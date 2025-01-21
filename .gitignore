@@ -1,0 +1,28 @@
+# MATLAB generated files
+*.asv
+*.m~
+*.mat
+*.fig
+slprj/
+*.slxc
+
+# Results and data directories
+examples/results/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Editor temporary files
+*.swp
+*~
+
+# Log files
+*.log
+
+# Specific directories to ignore
+results/synthetic_datasets/
+results/parallel results/
+
+# But keep these specific files/folders
+!example_data/LDoS_sim.mat
