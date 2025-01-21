@@ -1,0 +1,294 @@
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Dataset Generation Protocol
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. Parameter Selection
+   - Primary control parameters: theta_cap, kernel_size, SNR
+   - Each parameter has 3 difficulty levels: hard, medium, easy
+     * theta_cap: [1e-3, 1e-4, 1e-5] (dense → sparse activation)
+     * kernel_size: [0.16, 0.04, 0.01] (ratio of image area)
+     * SNR: [1.0, 3.16, 10.0] (low → high signal quality)
+
+2. Sampling Strategy
+   Using "targeted sparse" sampling to cover key regions:
+   a) Corner cases:
+      - Hardest case: All parameters at hardest setting
+      - Easiest case: All parameters at easiest setting
+   
+   b) Single-parameter stress tests:
+      - Hard theta_cap with easy other parameters
+      - Hard kernel_size with easy other parameters
+      - Hard SNR with easy other parameters
+   
+   c) Medium-difficulty combinations:
+      - All medium parameters
+      - Various Medium-Easy combinations to explore transition regions
+
+3. Dataset Generation Protocol
+   - Fixed parameters:
+     * image_size: [500, 500]
+     * num_kernels: 2
+     * n (energy layers): 1
+     * relative parameters: equal for all kernels
+   
+   - Interactive validation:
+     * Visual inspection of each generated dataset
+     * Option to regenerate if results are unsatisfactory
+     * Confirmation required before proceeding
+
+4. Data Collection and Storage
+   - Save complete parameter sets
+   - Store both clean and noisy observations
+   - Preserve ground truth kernels and activations
+   - Include timestamp in saved files for tracking
+   - Maintain parameter descriptions for analysis
+
+This systematic approach allows for:
+- Comprehensive coverage of the parameter space
+- Focus on boundary conditions and transition regions
+- Quality control through visual inspection
+- Reproducible dataset generation
+- Traceable parameter combinations for analysis
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Parallel Testing Strategy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. Algorithm Parameter Space
+   - Key tunable parameters:
+     * lambda1: [1e-2, 3.16e-2, 1e-1] (regularization strength)
+     * mini_loop: [1, 3, 9] (inner iteration count)
+   - Fixed parameters:
+     * maxIT: 30 (maximum outer iterations)
+     * phase2: false
+     * Xsolve: 'FISTA'
+     * xpos: true
+     * getbias: true
+
+2. Testing Infrastructure
+   a) Parallel Processing:
+      - Utilizes MATLAB's parallel computing toolbox
+      - Default pool size: 9 workers
+      - Each worker handles different parameter combinations
+   
+   b) Configuration Management:
+      - Separate config directories for each parameter combination
+      - Dynamic config file generation and cleanup
+      - Isolated worker environments to prevent interference
+
+3. Test Execution Protocol
+   - For each dataset:
+     * Initialize kernels consistently
+     * Broadcast dataset parameters to workers
+     * Run all parameter combinations in parallel
+     * Collect and store results including:
+       - Output kernels (Aout)
+       - Activation maps (Xout)
+       - Bias terms (bout)
+       - Additional metrics (extras)
+       - Success/failure status
+       - Error tracking
+
+4. Results Collection and Storage
+   - Comprehensive result structure including:
+     * All algorithm outputs
+     * Parameter combinations used
+     * Success/failure flags
+     * Error messages for failed cases
+   - Timestamp-based file naming
+   - Uses -v7.3 MAT-file format for large datasets
+
+5. Error Handling
+   - Robust error catching for each parameter combination
+   - Continues execution even if individual tests fail
+   - Preserves error information for failed cases
+   - Maintains overall test stability
+
+This parallel testing approach enables:
+- Efficient exploration of algorithm parameter space
+- Systematic evaluation of parameter combinations
+- Robust handling of computational resources
+- Comprehensive result collection and analysis
+- Reproducible testing environment
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Evaluation Metrics and Analysis Strategy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. Iteration-Level Metrics
+   a) Phase I Metrics (tracked per iteration):
+      - Activation Recovery Accuracy:
+        * Per-kernel activation similarity with ground truth
+        * Tracked across all iterations
+        * Stored in extras.phase1.activation_metrics[iter, kernel]
+      
+      - Kernel Quality Factors:
+        * Similarity between recovered and true kernels
+        * Tracked for each kernel independently
+        * Stored in extras.phase1.kernel_quality_factors[iter, kernel]
+
+   b) Phase II Metrics (if enabled):
+      - Refinement Quality Tracking:
+        * Activation metrics across refinement steps
+        * Kernel quality evolution during sphere lifting
+        * Stored in extras.phase2.activation_metrics[refinement, kernel]
+        * Stored in extras.phase2.kernel_quality_factors[refinement, kernel]
+
+2. Performance Metrics
+   - Runtime Analysis:
+      * Per-iteration timing
+      * Total execution time
+      * Stored in extras.runtime
+   
+   - Convergence Indicators:
+      * Kernel normalization factors (extras.normA)
+      * Final bias terms (bout)
+      * Parameter-specific information (extras.parameters)
+
+3. Quality Assessment Framework
+   - Multi-dimensional evaluation:
+      * Activation map accuracy
+      * Kernel reconstruction quality
+      * Computational efficiency
+      * Convergence stability
+   
+   - Cross-parameter Analysis:
+      * Impact of lambda1 on convergence
+      * Effect of mini_loop on solution quality
+      * Parameter sensitivity analysis
+      * Optimal parameter region identification
+
+4. Comparative Analysis Tools
+   - Parameter Space Exploration:
+      * Performance variation across parameter combinations
+      * Identification of stable operating regions
+      * Trade-off analysis between speed and accuracy
+   
+   - Robustness Assessment:
+      * Performance consistency across different initializations
+      * Sensitivity to noise levels
+      * Stability across different kernel configurations
+
+This comprehensive metrics framework enables:
+- Quantitative assessment of algorithm performance
+- Systematic parameter optimization
+- Identification of convergence patterns
+- Robust comparison across different test conditions
+- Data-driven refinement of algorithm parameters
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Visualization Strategy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Goal of visualization:
+- Visualize the performance of the algorithm across the system parameter space
+- Determine the optimal system parameter setting for the algorithm, or if the optimal setting is different for different datasets
+- If the optimal setting is different for different datasets, visualize the performance difference across different datasets,
+  and see if there is any correlation between the system parameters and the performance.
+
+1. Performance Metrics Visualization
+   a) Quality Metrics:
+      * Kernel Quality Factors
+      * Activation Recovery Accuracy
+      * Runtime Analysis
+   
+   b) Convergence Analysis:
+      * Primary Convergence Indicator:
+        - Observation Residual: ||Y - A*X||_F / ||Y||_F
+        - Relative change between iterations: |residual_k+1 - residual_k| / |residual_k|
+        - Physical Threshold: noise level of the dataset (η)
+        - Convergence achieved when residual change falls below η
+      
+      * Supporting Metrics (without thresholds):
+        - Kernel Quality trajectory
+        - Activation Recovery Accuracy trajectory
+        - These show evolution but don't determine convergence
+
+2. Visualization Methods
+   a) Parameter Space Heatmaps:
+      * 2D heatmaps (lambda1 vs mini_loop)
+      * Separate heatmaps for each metric
+      * Color intensity represents metric value
+      * Hatching/patterns to indicate convergence status
+
+   b) Convergence Trajectory Plots:
+      * Main Panel: Observation Residual
+        - Y-axis: log scale for residual
+        - Horizontal line at noise level η
+        - Multiple parameter combinations as different lines
+        - Clear indication of convergence points
+      
+      * Supporting Panels:
+        - Kernel Quality vs Iteration
+        - Activation Accuracy vs Iteration
+        - These show quality evolution but don't determine convergence
+
+3. Cross-Dataset Analysis
+   a) Parameter Performance Consistency:
+      * Compare heatmaps across different datasets
+      * Identify common optimal regions
+      * Highlight dataset-specific variations
+
+   b) Convergence Behavior Comparison:
+      * Compare convergence speeds across datasets
+      * Analyze parameter sensitivity per dataset
+      * Identify robust parameter combinations
+
+4. Interactive Visualization Features
+   - Toggle between different metrics
+   - Zoom into specific parameter regions
+   - Compare multiple datasets side by side
+   - Filter by convergence status
+   - Overlay multiple metrics for correlation analysis
+
+5. Specific Plot Designs
+
+   a) Primary Performance Heatmaps:
+      * Base Layout: 3x3 grid for lambda1 vs mini_loop
+      * Four separate figures for each metric:
+        - Final Kernel Quality (averaged across kernels)
+        - Final Activation Recovery Accuracy
+        - Runtime to Convergence (or total if not converged)
+        - Convergence Success (boolean or speed indicator)
+      * Color scheme: 
+        - Metric values: sequential colormap (e.g., viridis)
+        - Convergence indicator: hatching pattern overlay
+      * Annotations: Numerical values in each cell
+
+   b) Convergence Trajectory Plots:
+      * 2x2 Panel Layout:
+        - Top Left: Kernel Quality vs Iteration
+        - Top Right: Activation Accuracy vs Iteration
+        - Bottom Left: Relative Change in Kernel Quality
+        - Bottom Right: Relative Change in Activation Accuracy
+      * Features:
+        - Multiple parameter combinations as different lines
+        - Horizontal lines for convergence thresholds
+        - Vertical lines at convergence points
+        - Legend indicating parameter values
+
+   c) Cross-Dataset Comparison:
+      * Difference Heatmaps:
+        - Show variation in optimal parameters across datasets
+        - Highlight regions of consistent performance
+      * Parameter Sensitivity Plot:
+        - Bar plots showing metric variance across datasets
+        - Separate bars for each parameter combination
+
+   d) Summary Dashboard:
+      * Single figure combining key insights:
+        - Best performing parameters for each dataset
+        - Convergence success rate across parameter space
+        - Runtime distribution
+        - Parameter robustness indicators
+
+This visualization strategy enables:
+- Comprehensive performance assessment across parameter space
+- Clear identification of optimal parameter regions
+- Understanding of convergence behavior
+- Cross-dataset comparison and analysis
+- Insight into parameter sensitivity and robustness
+
+Questions: 
+1. what are we visualizing? 
+2. how are we visualizing? 
+

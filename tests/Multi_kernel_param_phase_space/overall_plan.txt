@@ -1,0 +1,87 @@
+Parameter Space Analysis for Multi-Kernel Detection Algorithm
+
+1. Core Parameters
+----------------
+Required parameters for synthetic dataset generation:
+- num_kernels: Number of kernels in the system
+- n: Number of energy layers per kernel
+- kernel_size: Size of individual kernels [width, height]
+- image_size: Size of the observation field [width, height]
+- theta_cap: Maximum probability for kernel activation
+- SNR: Signal-to-Noise Ratio
+
+Derived/Random parameters:
+- theta: Actual activation probabilities (randomly generated)
+- b0: Bias term (randomly generated)
+- A0: Kernel initializations from LDoS data
+
+Relative parameters:
+- Relative theta_cap between kernels
+- Relative kernel sizes
+- Inter-kernel similarity
+
+2. Test Cases
+----------------
+Extreme scenarios to test:
+a) Noise-free case
+b) Dense activation map
+c) Sparse activation map
+d) Overlapping kernels
+
+3. Parameter Space Testing Protocol
+----------------
+Primary control parameters (3 difficulty levels each):
+a) theta_cap: [1e-3, 1e-4, 1e-5] (dense → sparse)
+b) kernel_size: [0.16, 0.04, 0.01] (ratio to image area)
+c) SNR: [1.0, 3.16, 10.0] (low → high quality)
+
+Fixed parameters for testing:
+- image_size: [500, 500]
+- num_kernels: 2
+- n: 1 (single layer)
+- Equal relative parameters
+
+4. Algorithm Parameter Space
+----------------
+Tunable parameters:
+- lambda1: [1e-2, 3.16e-2, 1e-1]
+- mini_loop: [1, 3, 9]
+
+Fixed algorithm parameters:
+- maxIT: 30
+- phase2: false
+- Xsolve: 'FISTA'
+- xpos: true
+- getbias: true
+
+5. Evaluation Metrics
+----------------
+Performance metrics:
+1. Activation map recovery accuracy
+2. Kernel reconstruction quality
+3. Computational efficiency
+   - Per-iteration timing
+   - Total execution time
+4. Convergence stability
+   - Kernel normalization factors
+   - Final bias terms
+5. Parameter sensitivity
+
+6. Testing Strategy
+----------------
+1. Generate benchmark datasets covering parameter space
+2. Ensure test repeatability (multiple runs)
+3. Visual validation of generated datasets
+4. Parallel testing across parameter combinations
+5. Comprehensive result collection and storage
+6. Error handling and tracking
+
+7. Success Criteria
+----------------
+1. Stable convergence across parameter space
+2. Accurate kernel recovery
+3. Reliable activation map detection
+4. Reasonable computational efficiency
+5. Robust performance against noise
+
+This parameter space analysis serves as a framework for systematic algorithm testing and optimization. Results will guide parameter selection and identify stable operating regions for practical applications. 
