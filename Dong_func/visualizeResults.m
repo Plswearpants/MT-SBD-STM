@@ -49,7 +49,12 @@ function visualizeResults(Y, A0, Aout, X0, Xout, bout, extras, indices)
 
     % 2. Kernel Quality Analysis (using QPI patterns)
     fprintf('\nAnalyzing Kernel Quality with QPI Patterns:\n');
-    quality_factors = evaluateKernelQuality(Aout, A0, true, indices);
+    if nargin > 7 && ~isempty(indices)
+        quality_factors = evaluateKernelQuality(Aout, A0, true, indices);
+    else 
+        quality_factors = evaluateKernelQuality(Aout, A0, true);
+    end 
+
     fprintf('QPI-based Quality Factors:\n');
     for n = 1:num_kernels
         fprintf('Kernel %d: %.4f\n', n, quality_factors(n));
@@ -57,7 +62,11 @@ function visualizeResults(Y, A0, Aout, X0, Xout, bout, extras, indices)
 
     % 3. Activation Map Analysis
     fprintf('\nAnalyzing Activation Map Quality:\n');
-    [activation_metrics, aligned_maps] = evaluateActivationReconstruction(X0, Xout, kernel_size, true, indices);
+    if nargin > 7 && ~isempty(indices)
+        [activation_metrics, aligned_maps] = evaluateActivationReconstruction(X0, Xout, kernel_size, true, indices);
+    else 
+        [activation_metrics, aligned_maps] = evaluateActivationReconstruction(X0, Xout, kernel_size, true);
+    end 
 
     % Print detailed activation metrics
     fprintf('\nActivation Reconstruction Metrics:\n');

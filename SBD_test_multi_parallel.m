@@ -288,27 +288,6 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_parallel( Y, k, fixed_par
         % Store runtime in extras
         extras.runtime = total_runtime;
         
-        % When computing quality metrics, ensure X0 is properly formatted
-        if isfield(fixed_params, 'X0')
-            X0_eval = fixed_params.X0;  % This should be [height × width × num_kernels]
-            A0_eval = fixed_params.A0;  % This should be cell array of kernels
-        else
-            X0_eval = [];
-            A0_eval = [];
-        end
-
-        % Compute quality metrics with proper ground truth data
-        [quality_metrics, aligned_results] = computeQualityMetrics(...
-            Aout, Xout, bout, Y, ...
-            A0_eval, X0_eval);  % Pass ground truth data directly
-
-        % Store everything in extras
-        extras.quality_metrics = quality_metrics;
-        extras.aligned_results = aligned_results;
-        extras.param_combinations = parameter_combinations;
-        extras.param_idx = param_idx;
-        extras.dataset_idx = dataset_idx;
-        
     catch ME
         rethrow(ME);
     end

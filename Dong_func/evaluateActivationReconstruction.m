@@ -30,7 +30,11 @@ function [metrics, aligned_maps] = evaluateActivationReconstruction(X0, Xout, ke
     [Xout_aligned, offsets, align_quality] = alignActivationMaps(X0, Xout, kernel_size);
     
     % Step 2: Compute similarity with density-adaptive Gaussian
-    [similarities, filtered_maps] = computeActivationSimilarity(X0, Xout_aligned, kernel_size, visualize, indices);
+    if nargin > 4 && ~isempty(indices)
+        [similarities, filtered_maps] = computeActivationSimilarity(X0, Xout_aligned, kernel_size, visualize, indices);
+    else 
+        [similarities, filtered_maps] = computeActivationSimilarity(X0, Xout_aligned, kernel_size, visualize);
+    end
     
     % Store aligned maps
     aligned_maps.Xout_aligned = Xout_aligned;

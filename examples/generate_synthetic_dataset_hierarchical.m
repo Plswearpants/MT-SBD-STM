@@ -139,15 +139,20 @@ end
 
 %% 4. Add Noise Variations (Step 3)
 fprintf('\nGenerating noise variations...\n');
+
+% Reverse SNR values to process low SNR (harder cases) first
+SNR_values = flip(SNR_values);  % Now [1, 3.16, 10] instead of [10, 3.16, 1]
+
 final_datasets = cell(length(theta_cap_values), length(area_ratio_values), length(SNR_values));
 descriptions = cell(length(theta_cap_values), length(area_ratio_values), length(SNR_values));
 
-for i = 1:length(theta_cap_values)
-    for j = 1:length(area_ratio_values)
-        for k = 1:length(SNR_values)
-            fprintf('Processing theta_cap = %.2e, area_ratio = %.3f, SNR = %.1f )(%d,%d,%d/%d,%d,%d\n', ...
-                theta_cap_values(i), area_ratio_values(j), SNR_values(k), ...
-                i, j, k, length(theta_cap_values), length(area_ratio_values), length(SNR_values));
+% Reorder the loops to prioritize low SNR processing
+for k = 1:length(SNR_values)
+    for i = 1:length(theta_cap_values)
+        for j = 1:length(area_ratio_values)
+            fprintf('Processing SNR = %.1f, theta_cap = %.2e, area_ratio = %.3f (%d,%d,%d/%d,%d,%d)\n', ...
+                SNR_values(k), theta_cap_values(i), area_ratio_values(j), ...
+                k, i, j, length(SNR_values), length(theta_cap_values), length(area_ratio_values));
             
             % Get clean data from kernel variations
             clean_data = kernel_variations{i,j};
@@ -167,16 +172,20 @@ for i = 1:length(theta_cap_values)
     end
 end
 
-% Create parameter set matrix 
+% Create parameter set matrix (maintain the new SNR order)
 [T, A, S] = meshgrid(theta_cap_values, area_ratio_values, SNR_values);
 param_sets = [T(:), A(:), S(:)];  % Each row: [theta_cap, area_ratio, SNR]
 
 %% 5. Save Results
-% Convert cell arrays to 1D structure arrays
+% Convert cell arrays to 1D structure arrays with maintained order
 datasets = convert_to_struct(final_datasets);  % Now returns 1D struct array
 descriptions = reshape(descriptions, 1, []);  % Flatten to 1D
 
-% Save results with timestamp
+% Add a note about the ordering in the saved file
+ordering_info = struct('SNR_order', 'ascending', ...  % lowest to highest SNR
+                      'SNR_values', SNR_values);
+
+% Save results with timestamp and ordering information
 timestamp = datestr(now, 'yyyymmdd_HHMMSS');
 save_dir = 'results/synthetic_datasets';
 if ~exist(save_dir, 'dir')
@@ -185,7 +194,7 @@ end
 
 save_filename = fullfile(save_dir, sprintf('synthetic_datasets_%s.mat', timestamp));
 save(save_filename, 'datasets', 'descriptions', 'param_sets', ...
-    'fixed_params', 'sliceidx', 'LDoS_sim');
+    'fixed_params', 'sliceidx', 'LDoS_sim', 'ordering_info');
 
 fprintf('\nDatasets saved to: %s\n', save_filename);
 fprintf('Saved %d datasets as a 1D array\n', numel(datasets));
@@ -203,19 +212,9 @@ all_observations = zeros([fixed_params.image_size numel(datasets)]);
 % Fill the 3D array in order: theta -> area_ratio -> SNR
 for idx = 1:numel(datasets)
     all_observations(:,:,idx) = datasets(idx).Y;
-    
-    % Print parameter info for this slice
-    fprintf('Slice %d: θ=%.2e, A_ratio=%.3f, SNR=%.1f\n', ...
-        idx, ...
-        datasets(idx).params.theta_cap, ...
-        datasets(idx).params.kernel_size, ...
-        datasets(idx).params.SNR);
 end
 
 % Display using d3gridDisplay
-fprintf('\nDisplaying all observations. Use scroll wheel to navigate.\n');
-fprintf('Organization: Varying SNR (fastest), then area_ratio, then theta_cap (slowest)\n');
-
 figure('Name', 'All Synthetic Observations');
 d3gridDisplay(all_observations, 'dynamic');
 title('All Synthetic Observations');

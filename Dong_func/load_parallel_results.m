@@ -141,13 +141,13 @@ function [metrics] = load_parallel_results()
         if isfield(extras.phase1, 'kernel_quality_factors')
             kq = extras.phase1.kernel_quality_factors;
             metrics.kernel_quality_trajectory{dataset_idx, mini_loop_idx, lambda1_idx} = kq;
-            metrics.kernel_quality_final(dataset_idx, mini_loop_idx, lambda1_idx) = kq(end);
+            metrics.kernel_quality_final(dataset_idx, mini_loop_idx, lambda1_idx) = prod(kq(end,:));
         end
         
         if isfield(extras.phase1, 'activation_metrics')
             aa = extras.phase1.activation_metrics;
             metrics.activation_accuracy_trajectory{dataset_idx, mini_loop_idx, lambda1_idx} = aa;
-            metrics.activation_accuracy_final(dataset_idx, mini_loop_idx, lambda1_idx) = aa(end);
+            metrics.activation_accuracy_final(dataset_idx, mini_loop_idx, lambda1_idx) = prod(aa(end,:));
         end
         
         if isfield(extras, 'runtime')

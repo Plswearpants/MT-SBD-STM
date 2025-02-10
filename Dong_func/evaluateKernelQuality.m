@@ -12,6 +12,11 @@ function quality_factors = evaluateKernelQuality(output_kernels, gt_kernels, do_
         do_visualization = false;
     end
     
+    % Handle optional indices parameter
+    if nargin < 4
+        indices = [];
+    end
+    
     % Convert to cell if single kernel
     if ~iscell(output_kernels)
         output_kernels = {output_kernels};
