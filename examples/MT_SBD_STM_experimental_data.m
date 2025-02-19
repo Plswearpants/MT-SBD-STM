@@ -19,7 +19,7 @@ fprintf('\n\n');
 % QPI: Fourier transformed dIdV data
 
 % Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy006.3ds', 5);
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy012.3ds', 5);
 xsize = header.grid_dim(1);
 ysize = header.grid_dim(2);
 elayer = header.points;
@@ -28,12 +28,13 @@ eend = par(2);
 
 %% ~~~~~~~~~~~~~~~~~~~~~~~~~Data preprocess~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 %% I.0 data selection 
-target_data = dIdV;
+target_data = LockindIdV;
 rangetype='dynamic';
+figure;
 d3gridDisplay(target_data,rangetype);
 selected_slice = input('Enter the slice number you want to analyze: ');
 % change target data to single slice 
-target_data = dIdV(:,:,selected_slice);
+target_data = target_data(:,:,selected_slice);
 
 %% I.1Crop data
 mask= gridMaskSquare(target_data);

@@ -80,6 +80,10 @@ total_starttime = tic;
 
 %% Phase I: Initialization and First Iteration
 fprintf('PHASE I: Initialization and First Iteration\n');
+
+% Add demixing factor
+faint_factor = 1;
+
 A = kernel_initialguess;
 X_struct = struct();
 Xiter = zeros([size(Y),kernel_num]);
@@ -92,18 +96,19 @@ extras.phase1.kernel_quality_factors = zeros(maxIT, kernel_num);
 for iter = 1:maxIT
     iter_starttime = tic;  % Time each iteration separately if needed
 
-    % Compute Y_background
-    Y_residual = Y;
+    % Compute Y_background 
+    Y_sum = zeros(size(Y));
     for m = 1:kernel_num
         if iter > 1
-            Y_residual = Y_residual - convfft2(A{m}, Xiter(:,:,m));
+            Y_sum = Y_sum + convfft2(A{m}, Xiter(:,:,m));
         end
     end
+    Y_residual = Y - Y_sum;
     
     % Update each kernel
     for n = 1:kernel_num
-        % Calculate Yiter for this kernel
-        Yiter = Y_residual + (iter > 1) * convfft2(A{n}, Xiter(:,:,n));
+        % Calculate Yiter for this kernel 
+        Yiter = Y_residual + (iter > 1) * (1-1/(faint_factor*iter+1))*convfft2(A{n}, Xiter(:,:,n)) + (1/(faint_factor*iter+1))*Y_sum;
         
         dispfun1 = @(A, X) dispfun{n}(Y, A, X, k(n,:), []);
         
@@ -155,14 +160,16 @@ if params.phase2
     for i = 1:nrefine + 1
         fprintf('lambda iteration %d/%d: \n', i, nrefine + 1);
         
-        % initial Y_background
-        Y_residual = Y;
+        % Compute Y_background (changed to demixing approach)
+        Y_sum = zeros(size(Y));
         for m = 1:kernel_num
-            Y_residual = Y_residual - convfft2(A2{m}, X2_struct.(['x',num2str(m)]).X);
+            Y_sum = Y_sum + convfft2(A2{m}, X2_struct.(['x',num2str(m)]).X);
         end
+        Y_residual = Y - Y_sum;
 
         for n = 1:kernel_num
             fprintf('Processing kernel %d, lambda = %.1e: \n', n, lambda(n));
+            % Calculate Yiter with demixing approach
             Yiter = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
             dispfun2 = @(A, X) dispfun{n}(Y, A, X, k3(n,:), kplus(n,:));
             [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);

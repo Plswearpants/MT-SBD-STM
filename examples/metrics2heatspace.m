@@ -57,7 +57,7 @@ function h = plot_3D_heatspace(theta_cap_values, area_ratio_values, SNR_values, 
     
     % Add grid and adjust view
     grid on;
-    view(45, 30);
+    view(-10, 88);
     
     % Add colorbar label
     c = colorbar;
