@@ -8,7 +8,10 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_size, kerneltype, window
     %               empty or '' for no window
     %               'hann', 'hamming', 'blackman', 'gaussian', 'kaiser'
     %               For gaussian/kaiser, use cell array: {'gaussian', alpha} or {'kaiser', beta}
-    
+    % Outputs:
+    %   A1: cell array of initialized kernels
+    %       Each cell contains a kernel of size [h w] projected onto oblique manifold
+    %       If window_type is specified, window function is applied to each kernel
     % Set default window_type to empty if not provided
     if nargin < 5
         window_type = '';

@@ -1,4 +1,4 @@
-function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, dispfun, kernel_initialguess, AX_iteration, maxIT)
+function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
     %SBD Summary of this function goes here
     %
     %   PARAMS STRUCT:
@@ -63,8 +63,8 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
     mu = 10^-6;
     
     % Update the configuration file with the new max_iteration
-    update_config('Xsolve_config.mat', 'MAXIT', AX_iteration, 'Xsolve_config_tunable.mat');
-    update_config('Asolve_config.mat','options.maxiter', AX_iteration, 'Asolve_config_tunable.mat');
+    update_config('Xsolve_config.mat', 'MAXIT', Max_iteration, 'Xsolve_config_tunable.mat');
+    update_config('Asolve_config.mat','options.maxiter', Max_iteration, 'Asolve_config_tunable.mat');
     
     % Extract X0 and A0 from params
     if ~isfield(params, 'X0') || ~isfield(params, 'A0')

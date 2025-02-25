@@ -4,7 +4,8 @@ clc; clear;
 run('../init_sbd');
 fprintf('\n\n');
 
-%% 0. Load the .3ds data
+%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Data loading~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+%0. Load the .3ds data
 
 % INPUTS
 % 1: Data file to load, including file type ('QPI.3ds' for example)
@@ -36,7 +37,7 @@ selected_slice = input('Enter the slice number you want to analyze: ');
 % change target data to single slice 
 target_data = target_data(:,:,selected_slice);
 
-%% I.1Crop data
+%% I.1Crop data (optional)
 mask= gridMaskSquare(target_data);
 target_data= gridCropMask(target_data, mask);
 imagesc(target_data);
@@ -52,7 +53,6 @@ target_data = levelNoiseInteractive(target_data,'x');
 
 %% I.3 data normalization
 target_data = normalizeBackgroundToZeroMean3D(target_data,rangetype); 
-
 target_data = proj2oblique(target_data);
 
 figure; 
@@ -71,7 +71,6 @@ datasets.Y = target_data;
 [square_size] = squareDrawSize(target_data);
 datasets.params.kernel_size = [square_size;square_size];
 
-fprintf('Initializing kernels for %d datasets...\n', length(datasets));
 % Choose initialization method ('activation' or 'random')
 init_method = 'random';
 

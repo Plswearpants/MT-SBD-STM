@@ -1,3 +1,4 @@
+%This script runs MT_SBD on synthetic data
 clc; clear;
 
 % Import Manopt and initialize the SBD package

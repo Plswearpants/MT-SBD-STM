@@ -1,3 +1,4 @@
+% This script runs MT_SBD on real dataset. 
 clc; clear;
 
 % Import Manopt and initialize the SBD package
@@ -28,22 +29,27 @@ eend = par(2);
 
 %% ~~~~~~~~~~~~~~~~~~~~~~~~~Data preprocess~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 %% I.0 data selection 
-target_data = LockindIdV;
+target_data = dIdV;
 rangetype='dynamic';
 figure;
 d3gridDisplay(target_data,rangetype);
 selected_slice = input('Enter the slice number you want to analyze: ');
+num_kernels = input('enter the number of kernels you wish to apply: ');
 % change target data to single slice 
 target_data = target_data(:,:,selected_slice);
 
-%% I.1Crop data
-mask= gridMaskSquare(target_data);
+%% direct dataselect
+target_data = data_filtered;
+num_kernels=2;
+rangetype='dynamic';
+%% I.1 (Opt) Crop data
+mask= maskRectangle(target_data);
 target_data= gridCropMask(target_data, mask);
 imagesc(target_data);
 colormap("gray")
 axis square
 
-%% I.2 noise leveling 
+%% I.2 (Opt) noise leveling(if you have uneven structured noise)
 % noise level determination 
 eta_data = estimate_noise(target_data,'std');  
 
@@ -66,44 +72,44 @@ axis square;
 
 %% define square_size
 % draw square on the data to include as many visible ripples of the scattering as possible 
-[square_size] = squareDrawSize(target_data);
-%% Initialize as random kernel 
-kerneltype = 'random';   
-n = 1;               	% number of kernel slices
-% Randomly generate n kernel slices
-A0 = randn([square_size n]);
-% Need to put each slice back onto the sphere
-A0 = proj2oblique(A0);
+same_size = 1;
+kerneltype = 'selected';
+%window_type = {'gaussian', 5};
+window_type = '';
 
-%% Initialize as specific crop of the target slice
-[square_size,position, mask] = squareDrawSize(target_data(:,:,selected_slice));           	% determine kernel size
-[A0, ~] = gridCropMask(target_data(:,:,selected_slice), mask);   % the cropped real data as kernel(wishlist, could act as initial kernel in the iteration process)
-% Need to put each slice back onto the sphere
-A0 = proj2oblique(A0);
-
-%% Initialize as simulated kernel from TB model 
-% Randomly choose n kernel slices from simulated LDoS data
-n = 1;
-load('example_data/LDoS_sim.mat');
-sliceidx = randperm(size(LDoS_sim,3), n);
-A0 = NaN([square_size n]);
-    for i = 1:n
-        A0 = imresize(LDoS_sim(:,:,sliceidx), square_size);
+if same_size
+    [square_size] = squareDrawSize(target_data);
+    kernel_sizes = repmat(square_size,[num_kernels,1]);
+    A1 = initialize_kernels(target_data, num_kernels, kernel_sizes, kerneltype, window_type);
+else
+    A1 = cell(1, num_kernels);
+    kernel_sizes = zeros(num_kernels, 2); % Store sizes of each kernel [height, width]
+    for k = 1:num_kernels
+        fprintf('Select region for kernel %d/%d\n', k, num_kernels);
+        [square_size,position, mask] = squareDrawSize(target_data);           	% determine kernel size
+        [A1{k}, ~] = gridCropMask(target_data, mask);   % the cropped real data as kernel
+        % Need to put each slice back onto the sphere
+        A1{k} = proj2oblique(A1{k});
+        % Store the kernel size
+        kernel_sizes(k,:) = size(A1{k});
     end
+end
 
-% Need to put each slice back onto the sphere
-A0 = proj2oblique(A0);
-        
-    
-%% (Opt) Activation map generation:
-% Generate activation map based on the sliced data
-X0=activationCreateClick(target_data(:,:,selected_slice));
-
-m = size(X0);          % image size for each slice / observation grid
-
-%% (Opt)noise level determination 
+%% Display initialized kernels
+figure;
+for n = 1:num_kernels
+    subplot(1, num_kernels, n);
+    imagesc(A1{n});
+    title(sprintf('Initial Kernel %d', n));
+    colorbar;
+    axis square;
+end
+sgtitle('Initialized Kernels');
+%% (ESS)noise level determination 
 eta_data = estimate_noise(target_data, 'std');  
-SNR_data= var(A0(:))/eta_data;
+
+%% (Opt) determine SNR
+SNR_data= var(A1{1,1})/eta_data;
 fprintf('SNR_data = %d', SNR_data);
 
 %% (ESS) Define the observation as target_data
@@ -111,50 +117,58 @@ Y= target_data;
 
 %% II. Sparse Blind Deconvolution:
 %  ===============================
-%% III parameter setting and SBD run and record the whole update into a video
-
-% SBD settings
-params.lambda1 = 0.1;              % regularization parameter for Phase I
-
-params.phase2 = true;               % whether to do Phase II (refinement)
-params.kplus = ceil(0.5 * square_size);       % padding for sphere lifting
-params.lambda2 = 0.05;              % FINAL reg. param. value forclose  Phase II
-params.nrefine = 3;                 % number of refinements
-
-% Want entries of X to be nonnegative: see SBD_main.m
-params.signflip = 0.2;
-params.xpos     = true;
-params.getbias  = true;
-params.Xsolve = 'FISTA';
-
-% Create a VideoWriter object
-%video_filename = 'Ag.avi';  % Specify the output file name
-%v = VideoWriter(video_filename);  % Create the VideoWriter object
-%v.FrameRate = 10;  % Set the frame rate (adjust as needed)
-%open(v);  % Open the file for writing
+%% Settings
 
 % A function for showing updates as RTRM runs
 figure;
-dispfun = @( Y, A, X, square_size, kplus, idx ) showims_multikernel(Y,A0,X0,A,X,square_size,kplus,idx);
 
-% Capture the current frame
-frame = getframe(gcf);  % gcf gets the current figure
-    
-% Write the frame to the video
-%writeVideo(v, frame);
+dispfun = cell(1,num_kernels);
+dispfun{1} = @(Y, A, X, kernel_sizes, kplus) showims(Y,A1{1},X,A,X,kernel_sizes,kplus,1); % here the last entry in the showims function is the energy layer index n. 
+dispfun{2} = @(Y, A, X, kernel_sizes, kplus) showims(Y,A1{2},X,A,X,kernel_sizes,kplus,1);
+%dispfun{3} = @(Y, A, X, kernel_sizes, kplus) showims(Y,A1{3},X,A,X,kernel_sizes,kplus,1);
+%dispfun{4} = @(Y, A, X, kernel_sizes, kplus) showims(Y,A1{4},X,A,X,kernel_sizes,kplus,1);
+%dispfun{5} = @(Y, A, X, kernel_sizes, kplus) showims(Y,A1{5},X,A,X,kernel_sizes,kplus,1);
 
+
+% SBD settings.
+miniloop_iteration = 2;
+outerloop_maxIT= 30;
+
+params.lambda1 = [0.1, 0.1];  % regularization parameter for Phase I
+%params.lambda1 = [0.3, 0.3, 0.3, 0.3, 0.3];  % regularization parameter for Phase I
+params.phase2 = false;
+params.kplus = ceil(0.5 * kernel_sizes);
+params.lambda2 = [2e-2, 2e-2];  % FINAL reg. param. value for Phase II
+params.nrefine = 3;
+params.signflip = 0.2;
+params.xpos = true;
+params.getbias = true;
+params.Xsolve = 'FISTA';
+
+% noise variance for computeResidualQuality.m
+params.noise_var = eta_data;
+
+%% Run and save 
 % 2. The fun part
-[Aout, Xout, extras] = SBD_test( Y, square_size, params, dispfun, A0);
-%[Aout, Xout, extras] = SBD( Y, square_size, params, dispfun );
-
-% close video
-%close(v);
+[Aout, Xout, bout, extras] = MT_SBD(Y, kernel_sizes, params, dispfun, A1, miniloop_iteration, outerloop_maxIT);
 
 % Save the result
-save('SBD-STM_datarun_Stephanie_AgGrid006_2.mat', 'Y', 'Xout', 'Aout','extras','square_size', "params");
-%disp(['Video saved as ', video_filename]);
-%% Visualization 
-showims(Y,A0,Xout,Aout,Xout,square_size,[],1)
+% Generate a unique filename for the work space
+timestamp = datestr(now, 'yyyymmdd_HHMMSS');
+filename = sprintf('grid012_SBD_STM_results_%s.mat', timestamp);
 
-%% Visualization II
-showims_fft(Y,A0,Xout,Aout,Xout,square_size,[],1)
+% Ensure the filename is unique
+counter = 1;
+while exist(filename, 'file')
+    counter = counter + 1;
+    filename = sprintf('SBD_demixing_STM_results_3kernels%s_%d.mat', timestamp, counter);
+end
+
+% Save the specified variables to the workspace
+save(filename, 'Y', 'A1', 'Aout', 'Xout', 'bout', 'extras', 'Y');
+
+fprintf('Results saved to: %s\n', filename);
+
+%% Visualization of Results
+visualizeResults(Y, A1, Aout, Xout, Xout, bout, extras);
+%visualizeResults_old(Y, A0, Aout, X0, Xout, bout, extras);

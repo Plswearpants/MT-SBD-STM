@@ -30,7 +30,7 @@ end
 comment = sprintf("normalizeBackgroundToZeroMean3D(selected_slice:%d)|", selected_slice);
 
 % Get the dimensions of the 3D data array
-[n, ~, k] = size(data_3d);
+[rows, cols, k] = size(data_3d);
 
 % Display the selected slice and allow the user to select a rectangular region
 figure;
@@ -54,8 +54,8 @@ background = data_3d(y_min:y_max, x_min:x_max, selected_slice);
 % Calculate the mean of the background area
 background_mean = mean(background(:));
 
-% Initialize the output array
-normalized_data_3d = zeros(n, n, k);
+% Initialize the output array with correct dimensions
+normalized_data_3d = zeros(size(data_3d));  % Use exact same size as input
 
 % Process each slice individually using the same background area
 for i = 1:k
