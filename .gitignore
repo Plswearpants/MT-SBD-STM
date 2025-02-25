@@ -8,6 +8,7 @@ slprj/
 
 # Results and data directories
 examples/results/
+*.pptx
 
 # STM grid data files
 *.3ds
