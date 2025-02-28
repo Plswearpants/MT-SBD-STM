@@ -1,24 +1,15 @@
-# SBD-RTRM: Sparse blind deconvolution using the Riemannian Trust-Region Method (RTRM)
+# MT-SBD-STM: Multi-Type Sparse blind deconvolution using the Riemannian Trust-Region Method (RTRM) on STM images
 
-**SBD-RTRM** is a MATLAB package for *sparse blind deconvolution* (SBD) using the *Riemannian Trust Region* method (RTRM). As sparse blind deconvolution is a nonconvex problem, using RTRM ensures that local minima will be found in the associated optimization objective.
+This is a MATLAB package that aims to deconvolute multi-type kernels and their corresponding activations
 
-Our package is motivated by studies in blind deconvolution as a nonconvex optimization problem, and by applications in Scanning Tunneling Microscopy.
+As sparse blind deconvolution is a nonconvex problem, using RTRM ensures that local minima will be found in the associated optimization objective.
 
-For documentations, info and references see [docs/README.ipynb](./docs/README.ipynb).
+This work is inspired by work in SBD-STM shown by [Cheung et al (2020)](https://www.nature.com/articles/s41467-020-14633-1), in which they formulated the single SBD-STM problem: 
+<img width="646" alt="image" src="https://github.com/user-attachments/assets/63946883-6cfa-44b0-b877-e28cfaf07c72" />
 
-## Updates
-**2018-03-16**:
-- Implemented backwards compatibility with `Xsolve_pdNCG.m`. 
-- Multiple slices now works correctly for `Xsolve_FISTA.m`.
+We extend the algorithm into multi type defects, as in most materials, we observe more than one type of defects, here is an illustration of the work: 
+![image](https://github.com/user-attachments/assets/e48e51e4-87cc-4fa6-84c2-d0be148adbe3)
 
-**2018-02-19**:
-- Removed `signflip` option
-- Option `getbias` to estimate constant bias is added across `SBD.m`, `Asolve_Manopt.m` and `Xsolve_FISTA.m`. The pdNCG solver is now depreciated in terms of both `Xpos` and `getbias`.
+![image](https://github.com/user-attachments/assets/ddb843be-a8e6-4a6b-8871-60a3d1dd65ce)
 
-**2018-01-31**:
-- Option to solve for **X**>=0 `Xpos` is included.
-- Xsolver changed from pdNCG to FISTA, and the sparsity surrogate is changed from pseudo-Huber to Huber function.
 
-## Upcoming changes
-- Adding a reweighting method to sharpen recovered activation maps
-- Account for border effects
