@@ -4,7 +4,7 @@ This is a MATLAB package that aims to deconvolute multi-type kernels and their c
 
 As sparse blind deconvolution is a nonconvex problem, using RTRM ensures that local minima will be found in the associated optimization objective.
 
-This work is inspired by work in SBD-STM shown by [Cheung et al (2020)](https://www.nature.com/articles/s41467-020-14633-1), in which they formulated the single SBD-STM problem: 
+This work is inspired by work in Single SBD-STM shown by [Cheung et al (2020)](https://www.nature.com/articles/s41467-020-14633-1), in which they formulated the Single SBD-STM problem: 
 <img width="646" alt="image" src="https://github.com/user-attachments/assets/63946883-6cfa-44b0-b877-e28cfaf07c72" />
 
 We extend the algorithm into multi type defects, as in most materials, we observe more than one type of defects, here is an illustration of the work: 
