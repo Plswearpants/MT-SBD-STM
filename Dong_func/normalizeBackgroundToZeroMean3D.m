@@ -35,7 +35,7 @@ comment = sprintf("normalizeBackgroundToZeroMean3D(selected_slice:%d)|", selecte
 % Display the selected slice and allow the user to select a rectangular region
 figure;
 imagesc(data_3d(:,:,selected_slice));
-colormap('viridis');
+%colormap('viridis');
 axis square;
 title('Select Background Area (This will be applied to all slices)');
 h = imrect;

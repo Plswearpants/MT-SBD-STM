@@ -30,8 +30,8 @@ end
 % Preallocate the sliced LDoS array
 slicedglob_LDoS = zeros(size(LDoS_noisy, 1), size(LDoS_noisy, 2), size(LDoS_noisy, 3), 3);
 
-% nos for dynamic range, larger nos bigger contrast
-nos = 8;
+% nos for dynamic range, larger nos smaller contrast
+nos = 25;
 
 % Convert LDoS_result to image format using the colormap
 for k = 1:size(LDoS_noisy, 3)

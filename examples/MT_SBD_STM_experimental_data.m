@@ -20,7 +20,7 @@ fprintf('\n\n');
 % QPI: Fourier transformed dIdV data
 
 % Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy012.3ds', 5);
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('QPImap012.3ds', 5);
 xsize = header.grid_dim(1);
 ysize = header.grid_dim(2);
 elayer = header.points;
@@ -73,9 +73,9 @@ axis square;
 %% define square_size
 % draw square on the data to include as many visible ripples of the scattering as possible 
 same_size = 1;
-kerneltype = 'selected';
-%window_type = {'gaussian', 5};
-window_type = '';
+kerneltype = 'random';
+window_type = {'gaussian', 3};
+%window_type = '';
 
 if same_size
     [square_size] = squareDrawSize(target_data);
@@ -89,7 +89,7 @@ else
         [square_size,position, mask] = squareDrawSize(target_data);           	% determine kernel size
         [A1{k}, ~] = gridCropMask(target_data, mask);   % the cropped real data as kernel
         % Need to put each slice back onto the sphere
-        A1{k} = proj2oblique(A1{k});
+        %A1{k} = proj2oblique(A1{k});
         % Store the kernel size
         kernel_sizes(k,:) = size(A1{k});
     end
@@ -135,7 +135,7 @@ miniloop_iteration = 2;
 outerloop_maxIT= 30;
 
 params.lambda1 = [0.1, 0.1];  % regularization parameter for Phase I
-%params.lambda1 = [0.3, 0.3, 0.3, 0.3, 0.3];  % regularization parameter for Phase I
+%params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params.phase2 = false;
 params.kplus = ceil(0.5 * kernel_sizes);
 params.lambda2 = [2e-2, 2e-2];  % FINAL reg. param. value for Phase II
