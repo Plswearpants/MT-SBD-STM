@@ -1,41 +1,29 @@
-%This script runs MT_SBD on synthetic data
-clc; clear;
+% Define required inputs 
 
-% Import Manopt and initialize the SBD package
-run('../init_sbd');
-fprintf('\n\n');
-
-%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Create synthetic multi-kernel observation~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-%% 0. Define parameters
+SNR=2;
+N_obs= 100;
+observation_resolution=3;
+defect_density=0.001;
 LDoS_path = 'example_data/LDoS_sim.mat';
-interactive_selection = true;
-num_kernels = 3;
-image_size  = [300, 300];
-kernel_sizes = zeros(num_kernels,2);
-kernel_sizes(1,:) = [70, 70];
-kernel_sizes(2,:) = [70, 70];
-kernel_sizes(3,:) = [50, 50];
-SNR = 5;
-theta_cap = 2e-4;
 
-%% 1. Generate synthetic observation and visualize
-% generate 
-[Y, A0_noiseless, A0, X0, SNR, params] = generateSyntheticSTMData(...
-    num_kernels, ...
-    image_size, ...
-    kernel_sizes, ...
+[Y, A0, X0, params] = properGenObservation(...
     SNR, ...
-    theta_cap, ...
-    interactive_selection, ...
-    LDoS_path);
+    N_obs, ...
+    observation_resolution, ...
+    defect_density);
+    % Required Inputs:
+    %   SNR: Signal-to-noise ratio
+    %   N_obs: Size of observation lattice (N_obs x N_obs)
+    %   observation_resolution: Resolution factor (pixels per lattice site)
+    %   defect_density: Surface defect density (between 0 and 1)
+    %
+    % Optional Inputs:
+    %   rho_single: Single defect QPI simulation at energy omega (3D array for multiple energies)
+    %   LDoS_path: Path to LDoS simulation data
 
-% reassign the parameters 
-num_kernels = params.num_kernels;
 kernel_sizes = params.kernel_sizes;
-image_size = params.image_size;
-SNR = params.SNR;
-
-% normalize and visualize
+A0_noiseless = params.A0_noiseless;
+%% normalize and visualize
 rangetype = 'dynamic';  
 Y = normalizeBackgroundToZeroMean3D(Y,rangetype); 
 Y = proj2oblique(Y);
@@ -45,7 +33,6 @@ imagesc(Y);
 colorbar;
 axis square;
 
-%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Start SBD-STM on the synthetic data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 %% 2. Select starting kernel and display
 kerneltype = 'selected';   % existing options: 'random' or 'selected'
 
@@ -72,7 +59,6 @@ for n = 1:params.num_kernels
     colorbar;
     axis square;
 end
-sgtitle('Initialized Kernels');
 %% 3. Settings
 
 % A function for showing updates as RTRM runs

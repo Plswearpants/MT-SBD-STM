@@ -1,4 +1,4 @@
-function [Y, rho_single_resized, X_upsampled, SNR, params] = properGenObservation(varargin)
+function [Y, rho_single_resized_noisy, X_upsampled, params] = properGenObservation(varargin)
     % This function generates synthetic STM observations using a more physical approach
     % 
     % Required Inputs:
@@ -151,6 +151,7 @@ function [Y, rho_single_resized, X_upsampled, SNR, params] = properGenObservatio
     
     % Initialize arrays for processed data
     rho_single_resized = cell(1, num_kernels);
+    rho_single_resized_noisy = cell(1, num_kernels);
     X_upsampled = zeros(N_obs*p_scale, N_obs*p_scale, num_kernels);
     cutoff_M = zeros(1, num_kernels);
     target_size = zeros(num_kernels,2);
@@ -220,7 +221,11 @@ function [Y, rho_single_resized, X_upsampled, SNR, params] = properGenObservatio
     % Add noise based on SNR
     eta = var(Y_clean(:)) / SNR;
     Y = Y_clean + sqrt(eta) * randn(size(Y_clean));
-    
+
+    for k =1:num_kernels
+        rho_single_resized_noisy{k} = rho_single_resized{k} + sqrt(eta) * randn(size(rho_single_resized{k}));
+    end
+
     % Package parameters
     params = struct();
     params.N_single = N_single;
@@ -231,7 +236,8 @@ function [Y, rho_single_resized, X_upsampled, SNR, params] = properGenObservatio
     params.num_kernels = num_kernels;
     params.selected_slices = selected_slices;
     params.cutoff_M = cutoff_M;
-    params.kernel_size = target_size;
+    params.kernel_sizes = target_size;
+    params.A0_noiseless = rho_single_resized;
     % Final visualization
     figure('Name', 'Final Observation');
     subplot(1,2,1)
