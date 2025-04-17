@@ -1,9 +1,8 @@
 % Define required inputs 
-
 SNR=2;
-N_obs= 100;
+N_obs= 50;
 observation_resolution=3;
-defect_density=0.001;
+defect_density=0.001; % unit per lattice site 
 LDoS_path = 'example_data/LDoS_sim.mat';
 
 [Y, A0, X0, params] = properGenObservation(...

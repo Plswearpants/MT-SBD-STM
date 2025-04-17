@@ -4,70 +4,79 @@ run('../init_sbd');
 
 %% 1. Initial Setup
 % Load LDoS simulation data for kernel selection
-load('example_data/LDoS_sim.mat');
-
+load('example_data/LDoS_single_defect_save.mat');
+LDoS_sim = LDoS_result;
 % Display the 3D LDoS data for selection
 fprintf('Displaying 3D LDoS simulation data...\n');
+figure;
 d3gridDisplay(LDoS_sim, 'dynamic');
 title('LDoS Simulation Data - Use for Kernel Selection');
 
 % Get user input for kernel slice selection
-num_kernels = 2;  % Default number of kernels
-fprintf('\nPlease select %d slice indices for kernels (1-%d):\n', num_kernels, size(LDoS_sim,3));
+fprintf('\nPlease select slice indices (space-separated numbers): ');
+input_str = input('', 's');
+sliceidx = str2num(input_str);
+num_kernels = length(sliceidx);
 
-sliceidx = zeros(1, num_kernels);
-for k = 1:num_kernels
-    sliceidx(k) = input(sprintf('Enter slice index for kernel %d: ', k));
-    while sliceidx(k) < 1 || sliceidx(k) > size(LDoS_sim,3)
-        fprintf('Invalid slice index. Please enter a number between 1 and %d\n', size(LDoS_sim,3));
-        sliceidx(k) = input(sprintf('Enter slice index for kernel %d: ', k));
-    end
-end
+% Fixed parameters
+fixed_params.p_scale = 4;                       % Resolution factor
+fixed_params.N_single = N;                      % Input lattice size
+fixed_params.num_kernels = num_kernels;         % Number of kernels
+
+% Define parameter ranges for param_sets
+SNR_values = [10, 3.16, 1];                     % Different noise levels
+defect_density_values = logspace(-3, -2, 5);    % Different activation densities
+N_obs_values = [50, 100, 150, 200];           % Different observation lattice sizes
+
+% Create parameter set matrix
+[S, D, N] = meshgrid(SNR_values, defect_density_values, N_obs_values);
+param_sets = [S(:), D(:), N(:)];  % Each row: [SNR, defect_density, N_obs]
+
+fprintf('Parameter space setup complete:\n');
+fprintf('- SNR values: %d points from %.2f to %.2f\n', length(SNR_values), min(SNR_values), max(SNR_values));
+fprintf('- Defect density values: %d points from %.2e to %.2e\n', length(defect_density_values), min(defect_density_values), max(defect_density_values));
+fprintf('- N_obs values: %d points from %d to %d\n', length(N_obs_values), min(N_obs_values), max(N_obs_values));
+fprintf('Total parameter combinations: %d\n', size(param_sets, 1));
 
 % Display and confirm kernel selection
 confirm_kernel_selection(LDoS_sim, sliceidx);
 
-% Define parameter ranges
-theta_cap_values = logspace(-5, -3, 6);    % 6 different activation densities
-area_ratio_values = linspace(0.01, 0.16, 6);  % 6 different kernel sizes
-SNR_values = [10, 3.16, 1];                % 3 different noise levels
-
-% Fixed parameters
-fixed_params.num_kernels = num_kernels;
-fixed_params.image_size = [500, 500];
-fixed_params.relative_theta_cap = ones(1, num_kernels);
-fixed_params.relative_kernel_size = ones(1, num_kernels);
-
 %% 2. Generate Base Activations (Step 1)
-fprintf('\nStep 1: Generating base activations for different theta_cap values...\n');
-base_activations = struct('X0', {}, 'theta_cap', {});
+fprintf('\nStep 1: Generating base activations for different defect densities...\n');
+base_activations = struct('X0', {}, 'defect_density', {}, 'N_obs', {});
 
 % Create figure for activation review
 act_fig = figure('Name', 'Base Activation Pattern Review', ...
-                'Position', [100 100 800 800]);  % Made square for better visualization
+                'Position', [100 100 800 800]);
 
-% Generate and confirm base activations for each theta
-for i = 1:length(theta_cap_values)
+% Get unique combinations of defect_density and N_obs
+unique_combinations = unique(param_sets(:,[2 3]), 'rows');  % [rho_d, N_obs]
+
+% Generate and confirm base activations for each combination
+for i = 1:size(unique_combinations, 1)
     confirmed = false;
     while ~confirmed
-        fprintf('Generating activation for theta_cap = %.2e (%d/%d)\n', ...
-            theta_cap_values(i), i, length(theta_cap_values));
+        rho_d = unique_combinations(i,1);
+        N_obs = unique_combinations(i,2);
         
-        % Generate only activation maps (no kernels or noise yet)
-        X0 = generate_activation_maps(theta_cap_values(i), fixed_params);
+        fprintf('Generating activation for rho_d = %.2e, N_obs = %d (%d/%d)\n', ...
+            rho_d, N_obs, i, size(unique_combinations,1));
+        
+        % Generate activation maps for this N_obs and density
+        X0 = generate_activation_maps(N_obs, rho_d, fixed_params.p_scale, fixed_params.num_kernels);
         
         % Display for review
         clf(act_fig);
         
         % Create RGB image combining both activations
-        rgb_activation = zeros([fixed_params.image_size 3]);
+        rgb_activation = zeros([N_obs*fixed_params.p_scale N_obs*fixed_params.p_scale 3]);
         rgb_activation(:,:,1) = X0(:,:,1);  % First activation in red channel
         rgb_activation(:,:,2) = X0(:,:,2);  % Second activation in green channel
         
         % Display combined activations
         imagesc(rgb_activation);
-        title(sprintf('Combined Activations (θ=%.2e)\nRed: Kernel 1, Green: Kernel 2\nYellow: Overlap', ...
-            theta_cap_values(i)), 'FontSize', 12);
+        title(sprintf('Combined Activations (ρ_d=%.2e, N_{obs}=%d)\nRed: Kernel 1, Green: Kernel 2\nYellow: Overlap', ...
+            rho_d, N_obs), 'FontSize', 12);
         axis square;
         
         % Add colorbar with custom labels
@@ -106,81 +115,56 @@ for i = 1:length(theta_cap_values)
     
     % Store confirmed activation
     base_activations(i).X0 = X0;
-    base_activations(i).theta_cap = theta_cap_values(i);
+    base_activations(i).defect_density = rho_d;
+    base_activations(i).N_obs = N_obs;
 end
 close(act_fig);
 
-%% 3. Create Kernel Size Variations (Step 2)
-fprintf('\nStep 2: Creating kernel size variations...\n');
-kernel_variations = cell(length(theta_cap_values), length(area_ratio_values));
+%% 3. Create Dataset Variations
+fprintf('\nGenerating datasets for all parameter combinations...\n');
+final_datasets = cell(size(param_sets, 1), 1);
+descriptions = cell(size(param_sets, 1), 1);
 
-for i = 1:length(theta_cap_values)
-    for j = 1:length(area_ratio_values)
-        fprintf('Processing area_ratio = %.3f for theta_cap = %.2e\n', ...
-            area_ratio_values(j), theta_cap_values(i));
-        
-        % Use stored activation pattern
-        X0 = base_activations(i).X0;
-        
-        % Generate kernels for this size
-        [A0, A0_noiseless] = generate_kernels(LDoS_sim(:,:,sliceidx(1)), SNR_values(1), ...
-            size(LDoS_sim(:,:,sliceidx(1)), 1), fixed_params.image_size(1), fixed_params.image_size(1)/size(LDoS_sim(:,:,sliceidx(1)), 1));
-        
-        % Create clean observation
-        Y_clean = generate_clean_observation(A0_noiseless, X0);
-        
-        % Store without noise
-        kernel_variations{i,j} = struct('X0', X0, ...
-                                      'A0', {A0}, ...
-                                      'A0_noiseless', {A0_noiseless}, ...
-                                      'Y_clean', Y_clean);
-    end
+for i = 1:size(param_sets, 1)
+    % Get parameters for this iteration
+    SNR = param_sets(i,1);
+    rho_d = param_sets(i,2);
+    N_obs = param_sets(i,3);
+    
+    % Calculate M for this SNR
+    [M, ~] = find_cutoff_noise_intersection(LDoS_sim(:,:,sliceidx(1)), SNR, fixed_params.N_single, false);
+    
+    % Calculate area_ratio after we have M and N_obs
+    area_ratio = M / N_obs;
+    
+    fprintf('Processing combination %d/%d: SNR=%.1f, rho_d=%.2e, N_obs=%d (area_ratio=%.2e)\n', ...
+        i, size(param_sets,1), SNR, rho_d, N_obs, area_ratio);
+    
+    % Find corresponding base activation
+    base_idx = find([base_activations.defect_density] == rho_d & [base_activations.N_obs] == N_obs);
+    X0 = base_activations(base_idx).X0;
+    
+    % Generate kernels
+    [A0, A0_noiseless] = generate_kernels(LDoS_sim(:,:,sliceidx), SNR, ...
+        fixed_params.N_single, N_obs, fixed_params.p_scale);
+    
+    % Generate clean observation
+    Y_clean = generate_clean_observation(A0_noiseless, X0);
+    
+    % Add noise
+    [Y, A0] = add_noise_to_dataset(Y_clean, A0_noiseless, SNR);
+    
+    % Store dataset with both N_obs and derived area_ratio
+    final_datasets{i} = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, randn, rho_d, SNR, N_obs, area_ratio);
+    descriptions{i} = sprintf('SNR=%.1f, ρ_d=%.2e, N_obs=%d (area_ratio=%.2e)', ...
+        SNR, rho_d, N_obs, area_ratio);
 end
 
-%% 4. Add Noise Variations (Step 3)
-fprintf('\nGenerating noise variations...\n');
+% Convert cell arrays to 1D structure arrays
+datasets = [final_datasets{:}];
+descriptions = reshape(descriptions, 1, []);
 
-% Reverse SNR values to process low SNR (harder cases) first
-SNR_values = flip(SNR_values);  % Now [1, 3.16, 10] instead of [10, 3.16, 1]
-
-final_datasets = cell(length(theta_cap_values), length(area_ratio_values), length(SNR_values));
-descriptions = cell(length(theta_cap_values), length(area_ratio_values), length(SNR_values));
-
-% Reorder the loops to prioritize low SNR processing
-for k = 1:length(SNR_values)
-    for i = 1:length(theta_cap_values)
-        for j = 1:length(area_ratio_values)
-            fprintf('Processing SNR = %.1f, theta_cap = %.2e, area_ratio = %.3f (%d,%d,%d/%d,%d,%d)\n', ...
-                SNR_values(k), theta_cap_values(i), area_ratio_values(j), ...
-                k, i, j, length(SNR_values), length(theta_cap_values), length(area_ratio_values));
-            
-            % Get clean data from kernel variations
-            clean_data = kernel_variations{i,j};
-            
-            % Add noise
-            [Y, A0] = add_noise_to_dataset(clean_data.Y_clean, clean_data.A0_noiseless, SNR_values(k));
-            
-            % Store dataset
-            final_datasets{i,j,k} = store_dataset(Y, clean_data.Y_clean, A0, ...
-                clean_data.A0_noiseless, clean_data.X0, randn, ...
-                theta_cap_values(i), area_ratio_values(j), SNR_values(k));
-            
-            % Create description
-            descriptions{i,j,k} = sprintf('θ=%.2e, A_ratio=%.3f, SNR=%.1f', ...
-                theta_cap_values(i), area_ratio_values(j), SNR_values(k));
-        end
-    end
-end
-
-% Create parameter set matrix (maintain the new SNR order)
-[T, A, S] = meshgrid(theta_cap_values, area_ratio_values, SNR_values);
-param_sets = [T(:), A(:), S(:)];  % Each row: [theta_cap, area_ratio, SNR]
-
-%% 5. Save Results
-% Convert cell arrays to 1D structure arrays with maintained order
-datasets = convert_to_struct(final_datasets);  % Now returns 1D struct array
-descriptions = reshape(descriptions, 1, []);  % Flatten to 1D
-
+%% Save Results
 % Add a note about the ordering in the saved file
 ordering_info = struct('SNR_order', 'ascending', ...  % lowest to highest SNR
                       'SNR_values', SNR_values);
@@ -197,42 +181,72 @@ save(save_filename, 'datasets', 'descriptions', 'param_sets', ...
     'fixed_params', 'sliceidx', 'LDoS_sim', 'ordering_info');
 
 fprintf('\nDatasets saved to: %s\n', save_filename);
-fprintf('Saved %d datasets as a 1D array\n', numel(datasets));
-fprintf('Parameter space: %d theta_cap × %d area_ratio × %d SNR values\n', ...
-    length(theta_cap_values), length(area_ratio_values), length(SNR_values));
-fprintf('Parameter set matrix size: %d × 3\n', size(param_sets, 1));
+fprintf('Saved %d datasets\n', numel(datasets));
+fprintf('Parameter combinations: %d (SNR × defect_density × N_obs)\n', size(param_sets, 1));
 
 %% 6. Display Results Overview
 fprintf('\nDataset Overview:\n');
 fprintf('Total number of datasets: %d\n\n', numel(datasets));
 
-% Create 3D array of all observations
-all_observations = zeros([fixed_params.image_size numel(datasets)]);
+% Get unique values for each parameter using arrayfun
+unique_SNR = unique(arrayfun(@(x) x.params.SNR, datasets));
+unique_rho_d = unique(arrayfun(@(x) x.params.defect_density, datasets));
+unique_N_obs = unique(arrayfun(@(x) x.params.N_obs, datasets));
 
-% Fill the 3D array in order: theta -> area_ratio -> SNR
-for idx = 1:numel(datasets)
-    all_observations(:,:,idx) = datasets(idx).Y;
+fprintf('Parameter ranges:\n');
+fprintf('- SNR: %d values (%.1f to %.1f)\n', length(unique_SNR), min(unique_SNR), max(unique_SNR));
+fprintf('- Defect density: %d values (%.2e to %.2e)\n', length(unique_rho_d), min(unique_rho_d), max(unique_rho_d));
+fprintf('- N_obs: %d values (%d to %d)\n', length(unique_N_obs), min(unique_N_obs), max(unique_N_obs));
+
+% Create separate figures for different N_obs values
+for n = 1:length(unique_N_obs)
+    % Get datasets for this N_obs
+    idx_N_obs = find(arrayfun(@(x) x.params.N_obs == unique_N_obs(n), datasets));
+    N_current = length(idx_N_obs);
+    
+    % Create 3D array for this N_obs
+    obs_size = size(datasets(idx_N_obs(1)).Y);
+    all_obs_N = zeros([obs_size N_current]);
+    
+    for i = 1:N_current
+        all_obs_N(:,:,i) = datasets(idx_N_obs(i)).Y;
+    end
+    
+    % Create new figure for this N_obs
+    figure('Name', sprintf('Synthetic Observations N_obs=%d', unique_N_obs(n)));
+    d3gridDisplay(all_obs_N, 'dynamic');
+    title(sprintf('N_{obs} = %d (%d datasets)', unique_N_obs(n), N_current));
 end
 
-% Display using d3gridDisplay
-figure('Name', 'All Synthetic Observations');
-d3gridDisplay(all_observations, 'dynamic');
-title('All Synthetic Observations');
+% Add a summary of area ratios
+figure('Name', 'Area Ratio Distribution');
+area_ratios = arrayfun(@(x) x.params.area_ratio, datasets);
+histogram(area_ratios, 20);
+title('Distribution of Area Ratios');
+xlabel('Area Ratio (M/N_{obs})');
+ylabel('Count');
+
+% Print summary statistics
+fprintf('\nArea Ratio Statistics:\n');
+fprintf('- Min: %.2e\n', min(area_ratios));
+fprintf('- Max: %.2e\n', max(area_ratios));
+fprintf('- Mean: %.2e\n', mean(area_ratios));
+fprintf('- Median: %.2e\n', median(area_ratios));
 
 %% Helper Functions
-function X0 = generate_activation_maps(N_obs, rho_d, p_scale, num_kernels)
+function X0 = generate_activation_maps(N_single, rho_d, p_scale, num_kernels)
     % Initialize output
-    X0 = zeros(N_obs*p_scale, N_obs*p_scale, num_kernels);
+    X0 = zeros(N_single*p_scale, N_single*p_scale, num_kernels);
     for k = 1: num_kernels
         % Generate activation map with strict density control
-        target_defects = round(N_obs * N_obs * rho_d);  % Expected number of defects
+        target_defects = round(N_single * N_single * rho_d);  % Expected number of defects
         tolerance = 0.1;  % 10% tolerance
         min_defects = max(round(target_defects * (1-tolerance)), 1);
         max_defects = round(target_defects * (1+tolerance));
         
         X_good = false;
         while ~X_good
-            X = double(rand(N_obs, N_obs) <= rho_d);
+            X = double(rand(N_single, N_single) <= rho_d);
             num_defects = sum(X(:));
             X_good = (num_defects >= min_defects) && (num_defects <= max_defects);
         end
@@ -354,29 +368,25 @@ function confirm_kernel_selection(LDoS_sim, sliceidx)
     end
 end
 
-function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, theta_cap, area_ratio, SNR)
+function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, rho_d, SNR, N_obs, area_ratio)
     dataset.Y = Y;
     dataset.Y_clean = Y_clean;
     dataset.A0 = A0;
     dataset.A0_noiseless = A0_noiseless;
     dataset.X0 = X0;
     
-    % Calculate kernel sizes as 2×2 matrix where each row is [height, width] for one kernel
-    kernel_sizes = zeros(2, 2);  % Initialize [2×2] matrix
+    % Calculate kernel sizes
+    kernel_sizes = zeros(length(A0), 2);
     for k = 1:length(A0)
-        kernel_sizes(k,:) = size(A0{k});  % Store [height, width] for each kernel
+        kernel_sizes(k,:) = size(A0{k});
     end
     
-    dataset.params = struct('theta_cap', theta_cap, ...
-                          'kernel_size', kernel_sizes, ...  % [2×2] matrix of kernel sizes
-                          'SNR', SNR);
+    dataset.params = struct('defect_density', rho_d, ...
+                          'kernel_sizes', kernel_sizes, ...
+                          'SNR', SNR, ...
+                          'N_obs', N_obs, ...
+                          'area_ratio', area_ratio);
     dataset.b0 = b0;
-end
-
-function datasets_struct = convert_to_struct(datasets_cell)
-    % Convert cell array to 1D struct array
-    datasets_struct = [datasets_cell{:}];  % Flatten to 1D
-    datasets_struct = reshape(datasets_struct, 1, []);  % Ensure its a row vector
 end
 
 function regenerate_dataset()
