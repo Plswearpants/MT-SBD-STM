@@ -1,7 +1,7 @@
 function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve, varargin)
     %ASolve_MANOPT     BD using Manopt solvers.
     %   - Core usage:
-    %       [ Aout, Xsol, Stats ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve, max_iteration)
+    %       [ Aout, Xsol, Stats ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve)
     %
     %   - Optional variables:
     %       [ ... ] = Asolve_Manopt_tunable( ... , Xinit, Xpos, getbias, dispfun )

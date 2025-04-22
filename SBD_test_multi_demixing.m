@@ -59,6 +59,12 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
         Xsolve = params.Xsolve;
     end
     
+    if ~isfield(params, 'xinit') || isempty(params.xinit)
+        xinit = [];
+    else
+        xinit = params.xinit;
+    end
+    
     kernel_num = size(k,1);
     mu = 10^-6;
     
@@ -70,6 +76,7 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
     if ~isfield(params, 'X0') || ~isfield(params, 'A0')
         error('params must contain X0 and A0 for quality metrics');
     end
+    
     X0 = params.X0;
     A0 = params.A0;
     
@@ -107,9 +114,14 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
             dispfun1 = @(A, X) dispfun{n}(Y, A, X, k(n,:), []);
             
             if iter == 1
+                if isempty(xinit)
                 % Initial X computation
-                X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, [], xpos);
-            end
+                X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit, xpos);
+                else
+                X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit{n}, xpos);
+                % Or initial A computation 
+                end
+           end
             
             [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A{n}, lambda1(n), Xsolve, X_struct.(['x',num2str(n)]), xpos, getbias, dispfun1);
             

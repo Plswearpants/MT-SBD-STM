@@ -1,7 +1,7 @@
 function [ Xsol, info ] = Xsolve_FISTA_tunable( Y, A, lambda, mu, varargin )
 %XSOLVE_FISTA   Solve for X using FISTA method
 %   - Core usage:
-%       [ Xsol, info ] = Xsolve_FISTA_tunable( Y, A, lambda, mu, max_iteration )
+%       [ Xsol, info ] = Xsolve_FISTA_tunable( Y, A, lambda, mu)
 %
 %   - Optional variables:
 %       [ ... ] = Xsolve_FISTA_tunable( ... , Xinit, Xpos, getbias )
@@ -52,7 +52,6 @@ if ~isempty(varargin)
         getbias = varargin{3};
     end
 end
-
     %% Iterate:    
     t=1; W = X; u = b;
     costs = NaN(MAXIT,2);

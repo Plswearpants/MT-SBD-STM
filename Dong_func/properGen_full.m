@@ -176,11 +176,13 @@ function [Y, A0, X0, params] = properGen_full(varargin)
     fprintf('Selected starting slices: %s\n', num2str(selected_indices));
     
     % Create blocks of consecutive slices with periodic boundary conditions
-    A0 = cell(num_kernels, num_slices);
-    X0 = zeros(num_kernels, N_obs*p_scale, N_obs*p_scale);
+    A0 = cell(num_slices,num_kernels);
+    kernel_sizes = zeros(num_slices,num_kernels,2);
+    X0 = zeros(N_obs*p_scale, N_obs*p_scale, num_kernels);
     rho_single_resized = cell(1, size(rho_single,3));
     cutoff_M = zeros(1, size(rho_single,3));
     target_size = zeros(size(rho_single,3),2);
+    
     % created cutoffed kernels from rho_single and SNR
     for k = 1:size(rho_single,3)
         % Find cutoff M for this slice
@@ -203,6 +205,7 @@ function [Y, A0, X0, params] = properGen_full(varargin)
     end
 
     for b = 1:num_kernels
+        % get the kernel size
         start_idx = selected_indices(b);
         block_indices = start_idx:start_idx+num_slices-1;
         
@@ -220,24 +223,25 @@ function [Y, A0, X0, params] = properGen_full(varargin)
         end
         
         % Upsample X to match observation resolution
-        X0(b,:,:) = upsample_with_zero_blocks(X, p_scale);
+        X0(:,:,b) = upsample_with_zero_blocks(X, p_scale);
         
         % Handle periodic boundary conditions
         block_indices = mod(block_indices-1, total_slices) + 1;
             
         % Extract the block - use loop to assign each element individually
         for s = 1:num_slices
-            A0{b,s} = rho_single_resized{block_indices(s)};
+            A0{s,b} = rho_single_resized{block_indices(s)};
+            kernel_sizes(s,b,:) = size(A0{s,b});
         end
     end
     
 
     
-    % create Y from A0 and X0 by convolving A0{b,:} with X0(b,:,:)
+    % create Y from A0 and X0 by convolving A0{s,:} with X0(:,:,s)
     Y_clean = zeros(N_obs*p_scale, N_obs*p_scale, num_slices);
     for s = 1:num_slices
         for b = 1:num_kernels
-            Y_clean(:,:,s) = Y_clean(:,:,s) + convfft2(A0{b,s}, squeeze(X0(b,:,:)));
+            Y_clean(:,:,s) = Y_clean(:,:,s) + convfft2(A0{s,b}, squeeze(X0(:,:,b)));
         end
     end
     
@@ -248,7 +252,7 @@ function [Y, A0, X0, params] = properGen_full(varargin)
     % Add noise to each kernel
     for b = 1:num_kernels
         for s = 1:num_slices
-            A0{b,s} = A0{b,s} + sqrt(eta) * randn(size(A0{b,s}));
+            A0{s,b} = A0{s,b} + sqrt(eta) * randn(size(A0{s,b}));
         end
     end
 
@@ -263,7 +267,7 @@ function [Y, A0, X0, params] = properGen_full(varargin)
     params.num_slices = num_slices;
     params.selected_indices = selected_indices;
     params.cutoff_M = cutoff_M;
-    params.kernel_sizes = target_size;
+    params.kernel_sizes = kernel_sizes;
     params.A0_noiseless = A0;
     params.X0 = X0;
     params.eta = eta;
