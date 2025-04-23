@@ -1,35 +1,36 @@
-
 %% Block 1: Generate Test Data and Initialize Kernels
 % Generate test set
-SNR = 2;              % Signal-to-noise ratio
-N_obs = 50;           % Observation lattice size (50x50)
-observation_resolution = 4;  % Resolution: 3 pixels per lattice site
+SNR = 4;              % Signal-to-noise ratio
+N_obs = 75;           % Observation lattice size (50x50)
+observation_resolution = 3;  % Resolution: 3 pixels per lattice site
 defect_density = 0.005;      % 0.1% defect density
-num_slices = 10;
+num_slices = 3;
+
 % Generate data with custom parameters
 [Y, A0, X0, params] = properGen_full(SNR, N_obs, observation_resolution, defect_density, ...
     'LDoS_path', 'example_data/LDoS_single_defect_save.mat', ...
     'num_slices', num_slices);
 
+% Extract parameters from generated data
+A0_noiseless = params.A0_noiseless;
 num_kernels = params.num_kernels;
 num_slices = params.num_slices; 
-kernel_sizes_all = cell(num_slices,1);
-for s = 1: num_slices
-    kernel_sizes_all{s} = zeros(num_kernels, 2);
-    for k = 1: num_kernels
-    kernel_sizes_all{s}(k,:) = size(A0{s,k}); 
+
+% Standardize kernel sizes structure
+kernel_sizes = zeros(num_slices, num_kernels, 2);
+for s = 1:num_slices
+    for k = 1:num_kernels
+        kernel_sizes(s,k,:) = size(A0{s,k});
     end
 end
 
 % Normalize and visualize
-rangetype = 'dynamic';  
-Y = normalizeBackgroundToZeroMean3D(Y, rangetype); 
+Y = normalizeBackgroundToZeroMean3D(Y, 'dynamic'); 
 Y = proj2oblique(Y);
 
 % Display the 3D data and let the user input the reference slice
 figure; 
 d3gridDisplay(Y,'dynamic');
-% Let the user input the reference slice
 title('Select a reference slice');
 params.ref_slice = input('Enter reference slice number: ');
 
@@ -40,30 +41,35 @@ end
 
 fprintf('Using slice %d as reference\n', params.ref_slice);
 
+% Extract reference slice data
 Y_ref = Y(:,:,params.ref_slice);
 X0_ref = X0;
-A0_ref = cell(1, params.num_kernels);
-
-for i= 1: params.num_kernels
+A0_ref = cell(1, num_kernels);
+for i = 1:num_kernels
     A0_ref{i} = A0{params.ref_slice,i};
 end
+
 % Display the selected reference slice
 figure;
 imagesc(Y_ref);
 colorbar;
 title(sprintf('Reference Slice %d', params.ref_slice));
 axis square;
-kernel_size_ref = squeeze(params.kernel_sizes(params.ref_slice,:,:));
 
-% Initialize kernels
-kerneltype = 'selected';
-window_type = {'gaussian', 5};  % Example: gaussian window with alpha
-A1 = initialize_kernels(Y_ref, params.num_kernels, kernel_size_ref, kerneltype, window_type);
+%% Initialize kernels
+window_type = {'gaussian', 2.5};  % Example: gaussian window with alpha
+kernel_sizes_ref = squeeze(kernel_sizes(params.ref_slice,:,:));
+figure;
+for k = 1: num_kernels 
+    subplot(1,num_kernels,k); imagesc(A0{params.ref_slice,k})
+    axis square
+end
+A1 = initialize_kernels(Y_ref, num_kernels, kernel_sizes_ref, 'selected', window_type);
 
 % Display initialized kernels
 figure;
-for n = 1:params.num_kernels
-    subplot(1, params.num_kernels, n);
+for n = 1:num_kernels
+    subplot(1, num_kernels, n);
     imagesc(A1{n});
     title(sprintf('Initial Kernel %d', n));
     colorbar;
@@ -73,37 +79,30 @@ end
 %% Block 2: Find Optimal Activation for Reference Slice
 % Set up display functions
 figure;
-dispfun = cell(1, params.num_kernels);
+dispfun = cell(1, num_kernels);
 for n = 1:num_kernels
     dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_ref, A1{n}, X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
 end
 
 % SBD settings
-initial_iteration = 3;
-maxIT = 30;
+initial_iteration = 2;
+maxIT = 20;
 params.phase2 = false;
-params.lambda1 = [5e-2, 5e-2, 5e-2];  % regularization parameter for Phase I
-params.kplus = ceil(0.5 * params.kernel_sizes);
+params.lambda1 = [3e-2, 5e-2, 5e-2];  % regularization parameter for Phase I
+params.kplus = ceil(0.5 * kernel_sizes_ref);
 params.lambda2 = [1e-2, 1e-2, 1e-2];  % FINAL reg. param. value for Phase II
 params.signflip = 0.2;
 params.xpos = true;
 params.getbias = true;
 params.Xsolve = 'FISTA';
-params.Xsolve = 'FISTA';
-% Store ground truth for testing
 params.X0 = X0_ref;
 params.A0 = A0_ref;
-%{
-for k = 1:params.num_kernels
-    params.xinit{k}.X = X0_ref(:,:,k);
-    params.xinit{k}.b = extras.phase1.biter(k); 
-end
-%}
 
 % Run SBD on reference slice
 fprintf('Finding optimal activation for reference slice %d...\n', params.ref_slice);
 [A_ref, X_ref, ~, extras] = SBD_test_multi_demixing(...
-    Y_ref, kernel_size_ref, params, dispfun, A1, initial_iteration, maxIT);
+    Y_ref, kernel_sizes_ref, params, dispfun, A1, initial_iteration, maxIT);
+
 % Store reference results
 ref_results = struct();
 ref_results.A = A_ref;
@@ -111,26 +110,22 @@ ref_results.X = X_ref;
 ref_results.extras = extras;
 
 %% Block 3: Find Most Isolated Points and Generate Initial A Guesses
-% This block calculates isolation scores for defects and generates initial kernel guesses
-
 fprintf('Calculating isolation scores and finding most isolated points...\n');
 
 % Get defect positions from X_ref
-most_isolated_points = cell(1, params.num_kernels);
-isolation_scores = cell(1, params.num_kernels);
-
-% First, get all defect positions for each kernel
-defect_positions = cell(1, params.num_kernels);
-num_defects = zeros(1, params.num_kernels);
+most_isolated_points = cell(1, num_kernels);
+isolation_scores = cell(1, num_kernels);
+defect_positions = cell(1, num_kernels);
+num_defects = zeros(1, num_kernels);
 
 % Create figure for activation value distributions
 figure('Name', 'Activation Value Distributions');
-for k = 1:params.num_kernels
+for k = 1:num_kernels
     % Plot histogram of activation values
-    subplot(2, params.num_kernels, k);
+    subplot(2, num_kernels, k);
     activation_values = X_ref(:,:,k);
     h = histogram(activation_values(activation_values > 0), 50);
-    set(gca, 'YScale', 'log');  % Set y-axis to log scale
+    set(gca, 'YScale', 'log');
     title(sprintf('Kernel %d Activation Distribution', k));
     xlabel('Activation Value');
     ylabel('Frequency (log scale)');
@@ -142,7 +137,7 @@ for k = 1:params.num_kernels
     hold off;
     
     % Plot cumulative distribution
-    subplot(2, params.num_kernels, k + params.num_kernels);
+    subplot(2, num_kernels, k + num_kernels);
     [counts, edges] = histcounts(activation_values(activation_values > 0), 50, 'Normalization', 'cdf');
     stairs(edges(1:end-1), counts);
     title(sprintf('Kernel %d Cumulative Distribution', k));
@@ -153,24 +148,24 @@ for k = 1:params.num_kernels
     hold off;
     
     % Get positions of defects above threshold
-    [rows, cols] = find(X_ref(:,:,k) > threshold);  % Note: X_ref is [spatial_x, spatial_y, num_kernels]
+    [rows, cols] = find(X_ref(:,:,k) > threshold);
     defect_positions{k} = [rows, cols];
     num_defects(k) = size(defect_positions{k}, 1);
     fprintf('Kernel %d has %d defects above threshold %.4f\n', k, num_defects(k), threshold);
 end
 
 % Calculate isolation scores for each kernel
-for k = 1:params.num_kernels
+for k = 1:num_kernels
     if num_defects(k) == 0
         warning('No defects found for kernel %d', k);
         continue;
     end
     
     % Create summed activation map of all other kernels
-    X_others = zeros(size(X_ref(:,:,1)));  % Initialize with correct spatial dimensions
-    for l = 1:params.num_kernels
+    X_others = zeros(size(X_ref(:,:,1)));
+    for l = 1:num_kernels
         if l ~= k
-            X_others = X_others + X_ref(:,:,l);  % Sum all other kernels
+            X_others = X_others + X_ref(:,:,l);
         end
     end
     
@@ -203,16 +198,13 @@ for k = 1:params.num_kernels
     % Calculate isolation scores only for valid points
     S_k = zeros(size(valid_defects, 1), 1);
     for i = 1:size(valid_defects, 1)
-        % Calculate distances to all points in X_others
         diffs = other_positions - valid_defects(i,:);
-        distances = sum(diffs.^2, 2);  % squared Euclidean distances
-        S_k(i) = min(distances);  % minimum distance to any defect in other kernels
+        distances = sum(diffs.^2, 2);
+        S_k(i) = min(distances);
     end
     
     % Find the most isolated point among valid points
     [max_score, max_idx] = max(S_k);
-    
-    % Convert back to original indices
     valid_indices = find(valid_points);
     max_idx = valid_indices(max_idx);
     
@@ -225,37 +217,28 @@ end
 
 % Visualize the results
 figure('Name', 'Isolation Analysis');
-for k = 1:params.num_kernels
-    subplot(2, params.num_kernels, k);
-    
-    % Plot activation map for current kernel
-    imagesc(X_ref(:,:,k));  % Directly index the k-th kernel
+for k = 1:num_kernels
+    subplot(2, num_kernels, k);
+    imagesc(X_ref(:,:,k));
     hold on;
-    
-    % Plot all defects
     scatter(defect_positions{k}(:,2), defect_positions{k}(:,1), 50, 'w', 'o');
-    
-    % Highlight the most isolated point
     if ~isempty(most_isolated_points{k})
         scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
     end
-    
     title(sprintf('Kernel %d', k));
     colorbar;
     axis square;
     hold off;
     
-    % Plot summed map of other kernels
-    subplot(2, params.num_kernels, k + params.num_kernels);
+    subplot(2, num_kernels, k + num_kernels);
     X_others = zeros(size(X_ref(:,:,1)));
-    for l = 1:params.num_kernels
+    for l = 1:num_kernels
         if l ~= k
             X_others = X_others + X_ref(:,:,l);
         end
     end
     imagesc(X_others);
     hold on;
-    % Highlight the most isolated point from kernel k on the summed map
     if ~isempty(most_isolated_points{k})
         scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
     end
@@ -275,40 +258,41 @@ isolation_analysis.num_defects = num_defects;
 fprintf('Isolation analysis complete.\n');
 
 %% Block 4: Initialize Kernels Using Most Isolated Points
-use_ref = 1;
-change_size = false;
-
-% This block uses the most isolated points to generate initial kernel guesses for all slices
-
-fprintf('\nInitializing kernels using most isolated points for all slices...\n');
-
-% Initialize arrays for reference kernel sizes
-ref_kernel_sizes = zeros(params.num_kernels, 2);
-for k = 1:params.num_kernels
-    ref_kernel_sizes(k,:) = size(A_ref{k});
+% Choose target kernel sizes
+type = 'kernel_sizes_cap';
+if strcmp(type, 'ref_kernel_sizes')
+    target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
+elseif strcmp(type, 'kernel_sizes_cap')
+    target_kernel_sizes = squeeze(max(kernel_sizes,[],1));
+elseif strcmp(type, 'kernel_sizes_all')
+    target_kernel_sizes = kernel_sizes;
 end
 
-% Use kernel_sizes_all directly as target kernel sizes
-target_kernel_sizes = kernel_sizes_all;
-
-% align the most isolated points with ground truth activation 
-[~, offset, ~] = alignActivationMaps(X0_ref, X_ref, kernel_size_ref);
-% apply this offset to all most isolated points
-for k = 1:params.num_kernels
-    most_isolated_points{k} = most_isolated_points{k} + offset(k,:);
+% Prepare ground truth kernels
+if strcmp(type, 'kernel_sizes_all')
+    A0_used = A0;
+else
+    A0_used = padKernels(A0_noiseless, SNR, target_kernel_sizes);
 end
 
-% display the most isolated points on the ground truth activation map and let the user adjust the Points
+% Align most isolated points with ground truth activation
+[~, offset, ~] = alignActivationMaps(X0_ref, X_ref, kernel_sizes_ref);
+used_most_isolated_points = cell(1, num_kernels);
+for k = 1:num_kernels
+    used_most_isolated_points{k} = most_isolated_points{k} + offset(k,:);
+end
+
+% Display most isolated points
 figure;
 imagesc(Y_ref);
 hold on;
-for k = 1:params.num_kernels
+for k = 1:num_kernels
     scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
 end
 
-% Convert most_isolated_points from cell to matrix format
-kernel_centers = zeros(params.num_kernels, 2);
-for k = 1:params.num_kernels
+% Convert most_isolated_points to matrix format
+kernel_centers = zeros(num_kernels, 2);
+for k = 1:num_kernels
     if ~isempty(most_isolated_points{k})
         kernel_centers(k,:) = most_isolated_points{k};
     else
@@ -317,23 +301,23 @@ for k = 1:params.num_kernels
 end
 
 % Initialize kernels for all slices
-A1_all = cell(params.num_slices, params.num_kernels);
+A1_all = cell(num_slices, num_kernels);
+matrix = true;  % Use matrix form for A1
+change_size = false;
 
-for s = 1:params.num_slices
-    fprintf('Initializing kernels for slice %d/%d...\n', s, params.num_slices);
-    if use_ref
-    % Initialize kernels with ref sizes for this slice
-    A1_all(s,:) = initialize_kernels_proliferation(Y(:,:,s), params.num_kernels, kernel_centers, window_type, ref_kernel_sizes, 'interactive', change_size);
+for s = 1:num_slices
+    fprintf('Initializing kernels for slice %d/%d...\n', s, num_slices);
+    if matrix
+        A1_all(s,:) = initialize_kernels_proliferation(Y(:,:,s), num_kernels, kernel_centers, window_type, target_kernel_sizes, 'interactive', change_size);
     else 
-    % Initialize kernels with target sizes for this slice
-    A1_all(s,:) = initialize_kernels_proliferation(Y(:,:,s), params.num_kernels, kernel_centers, window_type, target_kernel_sizes{s}, 'interactive', change_size);
+        A1_all(s,:) = initialize_kernels_proliferation(Y(:,:,s), num_kernels, kernel_centers, window_type, squeeze(kernel_sizes(s,:,:)), 'interactive', change_size);
     end
 end
 
 % Visualize initialized kernels for reference slice
 figure('Name', 'Initialized Kernels (Reference Slice)');
-for k = 1:params.num_kernels
-    subplot(1,params.num_kernels,k);
+for k = 1:num_kernels
+    subplot(1,num_kernels,k);
     imagesc(A1_all{params.ref_slice+1,k});
     colormap(gray);
     colorbar;
@@ -345,67 +329,65 @@ end
 init_results = struct();
 init_results.A = A1_all;
 init_results.kernel_centers = kernel_centers;
-init_results.kernel_sizes = ref_kernel_sizes;
+init_results.kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
 
 fprintf('Kernel initialization complete for all slices.\n');
-%% Turn A1_all to matrix form
-A1_all_matrix = cell(2,1);
-for k = 1:2
-    A1_all_matrix{k}= zeros(size(A1_all{1,k},1),size(A1_all{1,k},2),num_slices);
-    for s =1:10
+
+%% Convert A1_all to matrix form
+A1_all_matrix = cell(num_kernels,1);
+for k = 1:num_kernels
+    A1_all_matrix{k} = zeros(size(A1_all{1,k},1),size(A1_all{1,k},2),num_slices);
+    for s = 1:num_slices
         A1_all_matrix{k}(:,:,s) = A1_all{s,k};
     end
 end
 
-%% params setting 
-% Initialize arrays for results (these will be written to in parallel)
-A_all_out = cell(params.num_slices, params.num_kernels);
-X_all_out = zeros(size(Y,1), size(Y,2), params.num_kernels);
-b_all_out = zeros(params.num_kernels);
-extras_all_out = cell(1, 1);
-
-% Set up display functions
-figure;
-dispfun = cell(1, params.num_kernels);
-for n = 1:params.num_kernels
-    dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_used, A1_used{n}, X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
-end
-
-% SBD settings
-initial_iteration = 3;
-maxIT = 30;
-params.phase2 = false;
-params.lambda1 = [5e-2, 5e-2, 5e-2];  % regularization parameter for Phase I
-params.kplus = ceil(0.5 * params.kernel_sizes);
-params.lambda2 = [1e-2, 1e-2, 1e-2];  % FINAL reg. param. value for Phase II
-params.signflip = 0.2;
-params.xpos = true;
-params.getbias = true;
-params.Xsolve = 'FISTA';
-params.Xsolve = 'FISTA';
-% Store ground truth for testing
-params.X0 = X0_ref;
-params.A0 = A1_all_matrix;
-
-for k = 1:params.num_kernels
-    params.xinit{k}.X = X_ref(:,:,k);
-    b_temp = extras.phase1.biter(k); 
-    params.xinit{k}.b = repmat(b_temp,[num_slices,1]);  % dont use [1,num_size]
-end
-
 %% Run MTSBD_demixing_all_slice
-kernel_sizes_used = kernel_size_ref;
+kernel_sizes_used = squeeze(max(kernel_sizes,[],1));
 Y_used = Y;
 A1_used = A1_all_matrix;
 
-[Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_demixing_all_slice(...
-        Y_used, kernel_sizes_used, params, dispfun, A1_used, initial_iteration, maxIT);
-
-%% visualization section
-
-
-for i = 1: num_kernels
-    figure;
-    d3gridDisplay(Aout_slice{i},'dynamic');
+% Set up display functions
+figure;
+dispfun = cell(1, num_kernels);
+for n = 1:num_kernels
+    dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_used, A1_used{n}, X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
 end
 
+% Update params for MTSBD
+params.X0 = X0;
+params.A0 = A0_used;
+for k = 1:num_kernels
+    params.xinit{k}.X = X_ref(:,:,k);
+    b_temp = extras.phase1.biter(k); 
+    params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
+end
+
+[Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_demixing_all_slice(...
+    Y_used, kernel_sizes_used, params, dispfun, A1_used, initial_iteration, maxIT);
+
+%% Visualization
+% Convert Aout_slice to cell format for visualization
+Aout_cell = cell(num_slices, num_kernels);
+for s = 1:num_slices
+    for k = 1:num_kernels
+        Aout_cell{s,k} = Aout_slice{k}(:,:,s);
+    end
+end
+
+% Visualize results for each slice
+for s = 1:num_slices
+    % Prepare slice-specific data
+    Y_slice = Y(:,:,s);
+    A0_slice = cell(1, num_kernels);
+    for k = 1:num_kernels
+        A0_slice{k} = A0_used{k}(:,:,s);
+    end
+    Aout_slice_cell = cell(1, num_kernels);
+    for k = 1:num_kernels
+        Aout_slice_cell{k} = Aout_cell{s,k};
+    end
+    
+    % Call visualizeResults for this slice
+    visualizeResults(Y_slice, A0_slice, Aout_slice_cell, X0, Xout_slice, bout_slice(s,:), slice_extras, [s, 1]);
+end
