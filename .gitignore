@@ -28,6 +28,6 @@ results/synthetic_datasets/
 results/parallel results/
 
 # But keep these specific files/folders
-!example_data/LDoS_sim.mat
-!example_data/LDoS_single_defects_self=0.6_save.mat
-!example_data/LDoS_single_defect_save.mat
+!examples/example_data/LDoS_sim.mat
+!examples/example_data/LDoS_single_defects_self=0.6_save.mat
+!examples/example_data/LDoS_single_defect_save.mat
