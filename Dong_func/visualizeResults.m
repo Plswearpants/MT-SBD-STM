@@ -23,7 +23,7 @@ function visualizeResults(Y, A0, Aout, X0, Xout, bout, extras, indices)
     Y_reconstructed = zeros(size(Y));
     for i = 1:num_kernels
         Y_reconstructed = Y_reconstructed + convfft2(Aout{i}, Xout(:,:,i));
-        Y_reconstructed = Y_reconstructed + bout(i);  % Add bias term
+        %Y_reconstructed = Y_reconstructed + bout(i);  % Add bias term
     end
 
     % Prepare index string if indices provided

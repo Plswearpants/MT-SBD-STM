@@ -1,4 +1,4 @@
-function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
+function [ Aout, Xout, bout, extras ] = MTSBD_Xregulated( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
     %SBD Summary of this function goes here
     %
     %   PARAMS STRUCT:
@@ -59,6 +59,11 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
         Xsolve = params.Xsolve;
     end
     
+    if ~isfield(params, 'xinit') || isempty(params.xinit)
+        xinit = [];
+    else
+        xinit = params.xinit;
+    end
     kernel_num = size(k,1);
     mu = 10^-6;
     
@@ -78,6 +83,9 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
         gamma = 1e-3;  % Default cross-correlation regularization parameter
     else
         gamma = params.gamma;
+        if ~isnumeric(gamma) || ~isscalar(gamma) || gamma < 0
+            error('gamma must be a non-negative scalar');
+        end
     end
     
     %% Phase I: Initialization and First Iteration with demixing applied
@@ -90,9 +98,8 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
     % Initialize quality metrics arrays in extras
     extras.phase1.activation_metrics = zeros(maxIT, kernel_num);
     extras.phase1.kernel_quality_factors = zeros(maxIT, kernel_num);
-    extras.phase1.crosscorr_costs = zeros(maxIT, kernel_num);  % Track cross-correlation costs
-    
-    % Add demixing factor
+
+    % Add faint_factor 
     faint_factor = 1;
     
     for iter = 1:maxIT
@@ -107,30 +114,37 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
         end
         Y_residual = Y - Y_sum;
         
+        % Compute and validate X_all_flat
+        if iter > 1
+            X_all_flat = sum(Xiter, 3);
+            if ~isnumeric(X_all_flat) || ~ismatrix(X_all_flat)
+                error('X_all_flat must be a 2D matrix');
+            end
+        else
+            X_all_flat = zeros(size(Y));
+        end
+        
         % Update each kernel
         for n = 1:kernel_num
             % Calculate Yiter for this kernel (changed to demixing approach)
-            Yiter = Y_residual + (iter > 1) * (1-1/(faint_factor*iter+1))*convfft2(A{n}, Xiter(:,:,n)) + (1/(faint_factor*iter+1))*Y_sum;
+            if iter > 1
+                Yiter = Y_residual + (1-1/(faint_factor*iter+1))*convfft2(A{n}, Xiter(:,:,n)) + (1/(faint_factor*iter+1))*Y_sum;
+            else
+                Yiter = Y_residual;
+            end
             
             dispfun1 = @(A, X) dispfun{n}(Y, A, X, k(n,:), []);
             
             if iter == 1
                 % Initial X computation using test version with cross-correlation regularizer
-                X_struct.(['x',num2str(n)]) = Xsolve_FISTA_test(Y, A{n}, lambda1(n), mu, [], xpos, getbias, gamma, n);
+                X_struct.(['x',num2str(n)]) = Xsolve_FISTA_test(Y, A{n}, lambda1(n), mu, X_all_flat, gamma, xinit, xpos, getbias);
             end
             
             % Use appropriate solver based on params.Asolve
-                [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable_test(Yiter, A{n}, lambda1(n), 'FISTA_test', X_struct.(['x',num2str(n)]), xpos, getbias, gamma, n, dispfun1);
-            
+            [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable_test(Yiter, A{n}, lambda1(n), 'FISTA_test', X_all_flat, gamma, X_struct.(['x',num2str(n)]), xpos, getbias, dispfun1);
+
             Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
             biter(n) = X_struct.(['x',num2str(n)]).b;
-            
-            % Store cross-correlation cost
-            if isfield(info, 'costs') && size(info.costs, 2) >= 3
-                extras.phase1.crosscorr_costs(iter,n) = info.costs(end,3);
-            else
-                extras.phase1.crosscorr_costs(iter,n) = 0;  % Default to 0 if costs not available
-            end
         end
     
         % Keep the same quality metrics computation
@@ -166,7 +180,7 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
         % Initialize Phase II metrics
         extras.phase2.activation_metrics = zeros(nrefine + 1, kernel_num);
         extras.phase2.kernel_quality_factors = zeros(nrefine + 1, kernel_num);
-        extras.phase2.crosscorr_costs = zeros(nrefine + 1, kernel_num);  % Track cross-correlation costs
+
         
         for i = 1:nrefine + 1
             fprintf('lambda iteration %d/%d: \n', i, nrefine + 1);
@@ -185,17 +199,12 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
                 dispfun2 = @(A, X) dispfun{n}(Y, A, X, k3(n,:), kplus(n,:));
                 % Use appropriate solver based on params.Asolve
                 if strcmp(params.Asolve, 'Asolve_Manopt_tunable_test')
-                    [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable_test(Yiter, A2{n}, lambda(n), 'FISTA_test', X2_struct.(['x',num2str(n)]), xpos, getbias, gamma, n, dispfun2);
+                    [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable_test(Yiter, A2{n}, lambda(n), 'FISTA_test', X_all_flat, gamma, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);
                 else
                     [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), 'FISTA_test', X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);
                 end
                 
-                % Store cross-correlation cost
-                if isfield(info, 'costs') && size(info.costs, 2) >= 3
-                    extras.phase2.crosscorr_costs(i,n) = info.costs(end,3);
-                else
-                    extras.phase2.crosscorr_costs(i,n) = 0;  % Default to 0 if costs not available
-                end
+
                 
                 % Attempt to 'unshift" the a and x
                 score = zeros(2*kplus(n,1)+1, 2*kplus(n,2)+1);
@@ -217,7 +226,6 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
                 extras.phase2.A{n} = A2{n};
                 extras.phase2.X{n} = X2_struct.(['x',num2str(n)]).X;
                 extras.phase2.b(n) = X2_struct.(['x',num2str(n)]).b;
-                extras.phase2.info{n} = info;
             end
             
             % Evaluate metrics for this refinement

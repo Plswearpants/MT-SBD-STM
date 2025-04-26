@@ -135,6 +135,7 @@ function A1 = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, w
         
         % Project onto the oblique manifold and apply window
         A1{n} = proj2oblique(selected_kernel);
+        disp(size(A1{n}));
         A1{n} = apply_window(A1{n}, window_type);
         
         fprintf('Kernel %d initialized at center (%d,%d) with size [%d,%d]\n', ...

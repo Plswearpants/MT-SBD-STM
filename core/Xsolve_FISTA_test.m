@@ -1,22 +1,29 @@
-function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, varargin )
+function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, X_all_flat, gamma, varargin )
 %XSOLVE_FISTA_TEST   Test version of Xsolve_FISTA with sequential cross-correlation regularizer
 %   - Core usage:
-%       [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu )
+%       [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, X_all_flat, gamma )
 %
 %   - Optional variables:
-%       [ ... ] = Xsolve_FISTA_test( ... , Xinit, Xpos, getbias, gamma, current_idx )
+%       [ ... ] = Xsolve_FISTA_test( ... , Xinit, Xpos, getbias )
 %       Xinit:      initial value for X
 %       Xpos:       constrain X to be a positive solution
 %       getbias:    extract constant bias as well as X
-%       gamma:      cross-correlation regularization parameter
-%       current_idx: index of the current activation being updated
+
+    % Validate X_all_flat
+    if isempty(X_all_flat) || ~isnumeric(X_all_flat) || ~ismatrix(X_all_flat)
+        error('X_all_flat must be a non-empty 2D matrix');
+    end
+
+    % Validate gamma
+    if ~isnumeric(gamma) || ~isscalar(gamma) || gamma < 0
+        error('gamma must be a non-negative scalar');
+    end
 
     % Initialize variables and function handles:
     fpath = fileparts(mfilename('fullpath'));
     addpath([fpath '/helpers']);
     load([fpath '/../config/Xsolve_config.mat']); %#ok<*LOAD>
     g = huber(mu);
-    r = seq_crosscorr_regularizer(gamma);  % Initialize sequential cross-correlation regularizer
 
     m = size(Y);
     if (numel(m) > 2)
@@ -24,10 +31,10 @@ function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, varargin )
     else
         n = 1;
     end
-  
+
     %% Checking arguments:
     nvararg = numel(varargin);
-    if nvararg > 5
+    if nvararg > 3
         error('Too many input arguments.');
     end
 
@@ -47,23 +54,10 @@ function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, varargin )
         getbias = varargin{idx};
     end
 
-    idx = 4; gamma = 1e-3;  % Default cross-correlation regularization parameter
-    if nvararg >= idx && ~isempty(varargin{idx})
-        gamma = varargin{idx};
-        if gamma < 0
-            error('gamma must be non-negative');
-        end
-    end
+    % Initialize regularizer with X_all_flat and gamma
+    r = seq_crosscorr_regularizer(X_all_flat, gamma);
 
-    idx = 5; current_idx = 1;  % Default to first activation
-    if nvararg >= idx && ~isempty(varargin{idx})
-        current_idx = varargin{idx};
-        if current_idx < 1 || current_idx > n
-            error('current_idx must be between 1 and n');
-        end
-    end
-
-    % Initialize W and u
+    % Initialize W and u of the current kernel
     W = X;
     u = b;
     t = 1;
@@ -72,6 +66,9 @@ function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, varargin )
     count = 0;
     it = 0;
     doagain = true;
+
+    % Initialize store for cross-correlation regularizer
+    store = struct();
 
     while doagain
         it = it + 1;
@@ -89,16 +86,13 @@ function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, varargin )
 
         % Add scaled cross-correlation gradient
         if gamma > 0
-            % Create a 3D array with W as the current slice
-            W_3D = zeros([m, n]);
-            W_3D(:,:,current_idx) = W;
-            cross_corr_grad = r.grad(W_3D, current_idx);
+            [cross_corr_grad, store] = r.grad(W, store);
             % Ensure gradient is finite and scale by gamma
             if any(~isfinite(cross_corr_grad(:)))
                 warning('Non-finite values in cross-correlation gradient, setting to zero');
                 cross_corr_grad(~isfinite(cross_corr_grad)) = 0;
             end
-            grad_fW = grad_fW + gamma * cross_corr_grad;  % Scale by gamma
+            grad_fW = grad_fW + cross_corr_grad;  
         end
 
         % FISTA update
@@ -124,13 +118,15 @@ function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, varargin )
         X = X_; t = t_;
 
         % Compute costs
-        costs(it,1) = norm(convfft2(A(:,:,1), X) + b(1) - Y(:,:,1), 'fro')^2/2;  % data fidelity
+        f = 0;
+        for i = 1:n
+            f = f + norm(convfft2(A(:,:,i), reshape(X, m)) + b(i) - Y(:,:,i), 'fro')^2/2;
+        end
+        costs(it,1) = f;
         costs(it,2) = g.cost(X, lambda);  % regularization
+
         if gamma > 0
-            % Create a 3D array with X as the current slice
-            X_3D = zeros([m, n]);
-            X_3D(:,:,current_idx) = X;
-            cross_corr_cost = r.cost(X_3D, current_idx);
+            [cross_corr_cost, store] = r.cost(X, store);
             % Ensure cost is finite
             if ~isfinite(cross_corr_cost)
                 warning('Non-finite cross-correlation cost, setting to zero');

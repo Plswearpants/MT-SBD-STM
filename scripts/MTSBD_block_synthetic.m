@@ -4,7 +4,7 @@ SNR = 4;              % Signal-to-noise ratio
 N_obs = 75;           % Observation lattice size (50x50)
 observation_resolution = 3;  % Resolution: 3 pixels per lattice site
 defect_density = 0.005;      % 0.1% defect density
-num_slices = 3;
+num_slices = 11;
 
 % Generate data with custom parameters
 [Y, A0, X0, params] = properGen_full(SNR, N_obs, observation_resolution, defect_density, ...
@@ -56,7 +56,7 @@ colorbar;
 title(sprintf('Reference Slice %d', params.ref_slice));
 axis square;
 
-%% Initialize kernels
+% Initialize kernels
 window_type = {'gaussian', 2.5};  % Example: gaussian window with alpha
 kernel_sizes_ref = squeeze(kernel_sizes(params.ref_slice,:,:));
 figure;
@@ -64,6 +64,7 @@ for k = 1: num_kernels
     subplot(1,num_kernels,k); imagesc(A0{params.ref_slice,k})
     axis square
 end
+%
 A1 = initialize_kernels(Y_ref, num_kernels, kernel_sizes_ref, 'selected', window_type);
 
 % Display initialized kernels
@@ -84,11 +85,14 @@ for n = 1:num_kernels
     dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_ref, A1{n}, X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
 end
 
+% Choose which demixing method to use
+params.use_Xregulated = true;  % Set to true to use MTSBD_Xregulated, false for SBD_test_multi_demixing
+
 % SBD settings
-initial_iteration = 2;
-maxIT = 20;
+initial_iteration = 3;
+maxIT = 10;
 params.phase2 = false;
-params.lambda1 = [3e-2, 5e-2, 5e-2];  % regularization parameter for Phase I
+params.lambda1 = [5e-2, 5e-2, 3e-2];  % regularization parameter for Phase I
 params.kplus = ceil(0.5 * kernel_sizes_ref);
 params.lambda2 = [1e-2, 1e-2, 1e-2];  % FINAL reg. param. value for Phase II
 params.signflip = 0.2;
@@ -97,20 +101,45 @@ params.getbias = true;
 params.Xsolve = 'FISTA';
 params.X0 = X0_ref;
 params.A0 = A0_ref;
+params.xinit = [];
+% Add cross-correlation regularization parameter
+params.gamma = 1e-3;  % Cross-correlation regularization parameter
+
 
 % Run SBD on reference slice
 fprintf('Finding optimal activation for reference slice %d...\n', params.ref_slice);
-[A_ref, X_ref, ~, extras] = SBD_test_multi_demixing(...
-    Y_ref, kernel_sizes_ref, params, dispfun, A1, initial_iteration, maxIT);
+if params.use_Xregulated
+    [REG_A_ref, REG_X_ref, REG_bout, REG_extras] = MTSBD_Xregulated(...
+        Y_ref, kernel_sizes_ref, params, dispfun, A1, initial_iteration, maxIT);
+    % Store reference results
+    REG_ref_results = struct();
+    REG_ref_results.A = REG_A_ref;
+    REG_ref_results.X = REG_X_ref;
+    REG_ref_results.extras = REG_extras;
+else
+    [A_ref, X_ref, bout, extras] = SBD_test_multi_demixing(...
+        Y_ref, kernel_sizes_ref, params, dispfun, A1, initial_iteration, maxIT);
+    % Store reference results
+    ref_results = struct();
+    ref_results.A = A_ref;
+    ref_results.X = X_ref;
+    ref_results.extras = extras;
+end
 
-% Store reference results
-ref_results = struct();
-ref_results.A = A_ref;
-ref_results.X = X_ref;
-ref_results.extras = extras;
 
-%% Block 3: Find Most Isolated Points and Generate Initial A Guesses
+
+%% Block 3: Find Most Isolated Points and Initialize Kernels
 fprintf('Calculating isolation scores and finding most isolated points...\n');
+
+% Choose target kernel sizes first
+type = 'kernel_sizes_cap';
+if strcmp(type, 'ref_kernel_sizes')
+    target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
+elseif strcmp(type, 'kernel_sizes_cap')
+    target_kernel_sizes = squeeze(max(kernel_sizes,[],1));
+elseif strcmp(type, 'kernel_sizes_all')
+    target_kernel_sizes = kernel_sizes;
+end
 
 % Get defect positions from X_ref
 most_isolated_points = cell(1, num_kernels);
@@ -173,9 +202,8 @@ for k = 1:num_kernels
     [other_rows, other_cols] = find(X_others > max(X_others,[],'all')/10);
     other_positions = [other_rows, other_cols];
     
-    % Get default kernel size for boundary check
-    default_kernel_size = size(A_ref{k});
-    half_kernel_size = floor(default_kernel_size/2);
+    % Use target kernel size for boundary check
+    half_kernel_size = floor(target_kernel_sizes(k,:)/2);
     
     % First filter out points too close to boundaries
     valid_points = true(num_defects(k), 1);
@@ -255,19 +283,6 @@ isolation_analysis.most_isolated_points = most_isolated_points;
 isolation_analysis.isolation_scores = isolation_scores;
 isolation_analysis.num_defects = num_defects;
 
-fprintf('Isolation analysis complete.\n');
-
-%% Block 4: Initialize Kernels Using Most Isolated Points
-% Choose target kernel sizes
-type = 'kernel_sizes_cap';
-if strcmp(type, 'ref_kernel_sizes')
-    target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
-elseif strcmp(type, 'kernel_sizes_cap')
-    target_kernel_sizes = squeeze(max(kernel_sizes,[],1));
-elseif strcmp(type, 'kernel_sizes_all')
-    target_kernel_sizes = kernel_sizes;
-end
-
 % Prepare ground truth kernels
 if strcmp(type, 'kernel_sizes_all')
     A0_used = A0;
@@ -329,7 +344,7 @@ end
 init_results = struct();
 init_results.A = A1_all;
 init_results.kernel_centers = kernel_centers;
-init_results.kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
+init_results.kernel_sizes = target_kernel_sizes;
 
 fprintf('Kernel initialization complete for all slices.\n');
 
@@ -342,7 +357,11 @@ for k = 1:num_kernels
     end
 end
 
-%% Run MTSBD_demixing_all_slice
+%% Run for all_slice
+
+params.use_Xregulated = true;
+
+
 kernel_sizes_used = squeeze(max(kernel_sizes,[],1));
 Y_used = Y;
 A1_used = A1_all_matrix;
@@ -363,8 +382,13 @@ for k = 1:num_kernels
     params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
 end
 
-[Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_demixing_all_slice(...
-    Y_used, kernel_sizes_used, params, dispfun, A1_used, initial_iteration, maxIT);
+if params.use_Xregulated
+    [REG_Aout_ALL, REG_Xout_ALL, REG_bout_ALL, REG_extras_ALL] = MTSBD_Xregulated_all_slices(...
+        Y_used, kernel_sizes_used, params, dispfun, A1_used, initial_iteration, maxIT);
+else
+    [Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_demixing_all_slice(...
+        Y_used, kernel_sizes_used, params, dispfun, A1_used, initial_iteration, maxIT);
+end
 
 %% Visualization
 % Convert Aout_slice to cell format for visualization

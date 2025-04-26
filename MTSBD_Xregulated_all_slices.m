@@ -1,4 +1,4 @@
-function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
+function [ Aout, Xout, bout, extras ] = MTSBD_Xregulated_all_slices( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
     %SBD Summary of this function goes here
     %
     %   PARAMS STRUCT:
@@ -64,6 +64,7 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
     else
         xinit = params.xinit;
     end
+
     slices = size(Y,3);
     spatial = size(Y,1);
     kernel_num = size(k,1);
@@ -77,16 +78,25 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
     if ~isfield(params, 'X0') || ~isfield(params, 'A0')
         error('params must contain X0 and A0 for quality metrics');
     end
-    
     X0 = params.X0;
     A0 = params.A0;
+    
+    % Add cross-correlation regularization parameter
+    if ~isfield(params, 'gamma') || isempty(params.gamma)
+        gamma = 1e-3;  % Default cross-correlation regularization parameter
+    else
+        gamma = params.gamma;
+        if ~isnumeric(gamma) || ~isscalar(gamma) || gamma < 0
+            error('gamma must be a non-negative scalar');
+        end
+    end
     
     %% Phase I: Initialization and First Iteration with demixing applied
     fprintf('PHASE I: Initialization and First Iteration\n');
     A = kernel_initialguess;
     X_struct = struct();
     Xiter = zeros([spatial,spatial,kernel_num]);
-    biter = zeros(slices, kernel_num);
+    biter = zeros(slices,kernel_num);
 
     % use the initial guess if provided
     if ~isempty(xinit)
@@ -95,7 +105,7 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
             biter(:,n) = xinit{n}.b;
         end
     end
-
+    
     % Initialize quality metrics arrays in extras
     extras.phase1.activation_metrics = zeros(maxIT, kernel_num);
     extras.phase1.kernel_quality_factors = zeros(maxIT, kernel_num);
@@ -106,32 +116,39 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
     % Main iteration loop
     for iter = 1:maxIT
         iter_starttime = tic;
-        
+    
         % Compute Y_background with demixing approach
         Y_sum = zeros(size(Y));
         for m = 1:kernel_num
             X_current = Xiter(:,:,m);
             Y_sum = Y_sum + convfft3(A{m}, X_current(:,:,ones(1,size(Y_sum,3))));
         end
-
         Y_residual = Y - Y_sum;
+        
+        % Compute X_all_flat for cross-correlation regularization
+        X_all_flat = sum(Xiter, 3);
+        if ~isnumeric(X_all_flat) || ~ismatrix(X_all_flat)
+            error('X_all_flat must be a 2D matrix');
+        end
         
         % Update each kernel
         for n = 1:kernel_num
+            % Calculate Yiter for this kernel with demixing approach
             X_current = Xiter(:,:,n);
             Yiter = Y_residual + (1-1/(faint_factor*iter+1))*convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3)))) + (1/(faint_factor*iter+1))*Y_sum;
+            
             dispfun1 = @(A, X) dispfun{n}(Y(:,:,1), A(:,:,1), X, k(n,:), []);
             
             % Initial X computation only on first iteration if no initial guess is provided
             if iter == 1
                 if isempty(xinit)
-                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit, xpos);
+                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_test(Y, A{n}, lambda1(n), mu, X_all_flat, gamma, xinit, xpos, getbias);
                 else
-                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit{n}, xpos);
+                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_test(Y, A{n}, lambda1(n), mu, X_all_flat, gamma, xinit{n}, xpos, getbias);
                 end
             end
             
-            [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A{n}, lambda1(n), Xsolve, X_struct.(['x',num2str(n)]), xpos, getbias, dispfun1);
+            [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable_test(Yiter, A{n}, lambda1(n), 'FISTA_test', X_all_flat, gamma, X_struct.(['x',num2str(n)]), xpos, getbias, dispfun1);
             
             Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
             biter(:,n) = X_struct.(['x',num2str(n)]).b;
@@ -192,8 +209,8 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
                 % Calculate Yiter without demixing
                 Yiter = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
                 
-                dispfun2 = @(A, X) dispfun{n}(Y, A, X, k3(n,:), kplus(n,:));
-                [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);
+                dispfun2 = @(A, X) dispfun{n}(Y(:,:,1), A, X, k3(n,:), kplus(n,:));
+                [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable_test(Yiter, A2{n}, lambda(n), 'FISTA_test', X_all_flat, gamma, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);
                 
                 % Attempt to 'unshift" the a and x
                 score = zeros(2*kplus(n,1)+1, 2*kplus(n,2)+1);
@@ -226,7 +243,7 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
                 A2_central{n} = A2{n}(kplus(n,1)+(1:k(n,1)), kplus(n,2)+(1:k(n,2)));
             end
     
-            [activation_similarity, kernel_similarity] = computeQualityMetrics(X0, X2_combined, A0, A2_central, k3);
+            [activation_similarity, kernel_similarity] = computeQualityMetrics(X0, X2_combined, A0_first, A2_central, k3);
             extras.phase2.activation_metrics(i,:) = activation_similarity;
             extras.phase2.kernel_quality_factors(i,:) = kernel_similarity;
             

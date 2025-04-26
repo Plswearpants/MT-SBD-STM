@@ -23,7 +23,6 @@ function [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu, varargin )
         n = 1;
     end
   
-
     %% Checking arguments:
     nvararg = numel(varargin);
     if nvararg > 3

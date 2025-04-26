@@ -1,10 +1,10 @@
-function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable_test( Y, Ain, lambda, Xsolve, varargin)
+function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable_test( Y, Ain, lambda, Xsolve, X_all_flat, gamma, varargin)
     %ASolve_MANOPT_TEST     BD using Manopt solvers with sequential cross-correlation regularizer.
     %   - Core usage:
-    %       [ Aout, Xsol, Stats ] = Asolve_Manopt_tunable_test( Y, Ain, lambda, Xsolve, max_iteration)
+    %       [ Aout, Xsol, Stats ] = Asolve_Manopt_tunable_test( Y, Ain, lambda, Xsolve, X_all_flat, gamma)
     %
     %   - Optional variables:
-    %       [ ... ] = Asolve_Manopt_tunable_test( ... , Xinit, Xpos, getbias, gamma, current_idx, dispfun )
+    %       [ ... ] = Asolve_Manopt_tunable_test( ... , Xinit, Xpos, getbias, dispfun )
     %
 
     load([fileparts(mfilename('fullpath')) '/../examples/Asolve_config_tunable.mat']); %#ok<*LOAD>
@@ -20,21 +20,20 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable_test( Y, Ain, lambda, Xs
 
     %% Handle the extra variables:
     nvarargin = numel(varargin);
-    if nvarargin > 6
+    if nvarargin > 4
         error('Too many input arguments.');
     end
 
-    idx = 1;
-    if nvarargin < idx || isempty(varargin{idx})
-        if strcmp(Xsolve,'FISTA_test')
-            xinit = Xsolve_FISTA_test(Y, Ain, lambda, mu, [], xpos, getbias, gamma, current_idx);
-        elseif strcmp(Xsolve,'pdNCG')
-            xinit = Xsolve_pdNCG(Y, Ain, lambda, mu, [], xpos);
-        end
-    else
-        xinit = varargin{idx};
+    % Validate X_all_flat
+    if isempty(X_all_flat) || ~isnumeric(X_all_flat) || ~ismatrix(X_all_flat)
+        error('X_all_flat must be a non-empty 2D matrix');
     end
-    
+
+    % Validate gamma
+    if ~isnumeric(gamma) || ~isscalar(gamma) || gamma < 0
+        error('gamma must be a non-negative scalar');
+    end
+
     idx = 2;
     if nvarargin < idx || isempty(varargin{idx})
         xpos = false;
@@ -48,22 +47,19 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable_test( Y, Ain, lambda, Xs
     else
         getbias = varargin{idx};
     end
-
-    idx = 4;
+    
+    idx = 1;
     if nvarargin < idx || isempty(varargin{idx})
-        gamma = 1e-3;  % Default cross-correlation regularization parameter
+        if strcmp(Xsolve,'FISTA_test')
+            xinit = Xsolve_FISTA_test(Y, Ain, lambda, mu, X_all_flat, gamma, [], xpos, getbias);
+        elseif strcmp(Xsolve,'pdNCG')
+            xinit = Xsolve_pdNCG(Y, Ain, lambda, mu, [], xpos);
+        end
     else
-        gamma = varargin{idx};
-    end
-
-    idx = 5;
-    if nvarargin < idx || isempty(varargin{idx})
-        current_idx = 1;  % Default to first activation
-    else
-        current_idx = varargin{idx};
+        xinit = varargin{idx};
     end
     
-    idx = 6;
+    idx = 4;
     if nvarargin < idx || isempty(varargin{idx})
         dispfun = @(a, X) 0;
     else
@@ -72,16 +68,17 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable_test( Y, Ain, lambda, Xs
 
     %% Set up the problem structure for Manopt and solve
     problem.M = spherefactory(prod(k)*n);
-    problem.cost = @(a, store) costfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx);
-    problem.egrad = @(a, store) egradfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx);
-    problem.ehess = @(a, u, store) ehessfun(a, u, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx);
+    problem.cost = @(a, store) costfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat);
+    problem.egrad = @(a, store) egradfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat);
+    problem.ehess = @(a, u, store) ehessfun(a, u, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat);
 
     options.statsfun = @(problem, a, stats, store) statsfun(problem, a, stats, store, k, n, saveiterates, dispfun);
     %options.stopfun = @(problem, x, info, last) stopfun(problem, x, info, last, TRTOL);
 
     % Run Manopt solver:
     [Aout, extras.cost, info, extras.options] = ManoptSolver(problem, Ain(:), options);
-
+    extras.info = info;
+    
     % Produce final output:
     Aout = reshape(Aout, [k n]);
     if saveiterates
@@ -96,24 +93,24 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable_test( Y, Ain, lambda, Xs
         Xsol.b = info(end).b;
     else
         if strcmp(Xsolve,'FISTA_test')
-            Xsol = Xsolve_FISTA_test(Y, Aout, lambda, mu, xinit, xpos, getbias, gamma, current_idx);
+            Xsol = Xsolve_FISTA_test(Y, Aout, lambda, mu, X_all_flat, gamma, xinit, xpos, getbias);
         elseif strcmp(Xsolve,'pdNCG')
             Xsol = Xsolve_pdNCG(Y, Aout, lambda, mu, xinit, xpos, getbias);
         end
     end
 end
 
-function [ cost, store ] = costfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx)
+function [ cost, store ] = costfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat)
     if ~isfield(store, 'X')
-        store = computeX(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx);
+        store = computeX(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat);
     end
 
     cost = store.cost;
 end
 
-function [ egrad, store ] = egradfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx)
+function [ egrad, store ] = egradfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat)
     if ~isfield(store, 'X')
-        store = computeX(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx);
+        store = computeX(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat);
     end
     
     m = size(store.X);
@@ -128,23 +125,23 @@ function [ egrad, store ] = egradfun(a, store, Y, k, n, lambda, mu, xinit, xpos,
     end
 end
 
-function [ ehess, store ] = ehessfun(a, u, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx)
+function [ ehess, store ] = ehessfun(a, u, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat)
     if ~isfield(store, 'X')
-        store = computeX(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx);
+        store = computeX(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat);
     end
 
     ehess = H_function(u, Y, reshape(a, [k n]), store.X, lambda, mu);
 end
 
-function [ store ] = computeX(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, current_idx)
+function [ store ] = computeX(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, gamma, X_all_flat)
     % Updates the cache to store X*(A), and the active-set whenever a new
     % iteration by the trust-region method needs it.
     if strcmp(Xsolve,'FISTA_test')
-        [Xsol, info] = Xsolve_FISTA_test(Y, reshape(a, [k n]), lambda, mu, xinit, xpos, getbias, gamma, current_idx);
+        [Xsol, info] = Xsolve_FISTA_test(Y, reshape(a, [k n]), lambda, mu, X_all_flat, gamma, xinit ,xpos, getbias);
         store.X = Xsol.X;
         store.W = Xsol.W;
         store.b = Xsol.b;
-        store.cost = info.costs(end,1);  % Get the final cost from info
+        store.cost = sum(info.costs(end,:));  % Get the total cost including cross-correlation
     elseif strcmp(Xsolve,'pdNCG')
         sol = Xsolve_pdNCG(Y, reshape(a, [k n]), lambda, mu, xinit, xpos, getbias);
         store.X = sol.X;
@@ -161,5 +158,6 @@ function [ stats ] = statsfun(problem, a, stats, store, k, n, saveiterates, disp
         stats.W = store.W;
         stats.b = store.b;
     end
+    
     dispfun(a, store.X);
 end 
