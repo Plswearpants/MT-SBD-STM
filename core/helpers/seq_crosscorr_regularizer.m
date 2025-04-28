@@ -21,7 +21,7 @@ function [ r ] = seq_crosscorr_regularizer(X_all_flat, gamma, sigma)
         gamma = 1e-3;
     end
     if nargin < 3 || isempty(sigma)
-        sigma = 5.0;  % Default sigma value
+        sigma = 3.0;  % Default sigma value
     end
 
     % Validate input types and sizes
@@ -60,7 +60,7 @@ function [corr_val, x1_aligned, x2_aligned] = simple_crosscorr(x1, x2, sigma)
     x2 = x2 - mean(x2(:));
     
     % Simple Gaussian smoothing
-    window_size = ceil(3 * sigma);
+    window_size = ceil(2 * sigma);
     [x, y] = meshgrid(-window_size:window_size);
     gaussian_kernel = exp(-(x.^2 + y.^2)/(2*sigma^2));
     gaussian_kernel = gaussian_kernel / sum(gaussian_kernel(:));

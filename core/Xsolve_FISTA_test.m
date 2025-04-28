@@ -54,8 +54,8 @@ function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, X_all_flat, gamma
         getbias = varargin{idx};
     end
 
-    % Initialize regularizer with X_all_flat and gamma
-    r = seq_crosscorr_regularizer(X_all_flat, gamma);
+    % Initialize regularizer with X_all_flat 
+    r = seq_crosscorr_regularizer(X_all_flat);
 
     % Initialize W and u of the current kernel
     W = X;
@@ -92,7 +92,7 @@ function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, X_all_flat, gamma
                 warning('Non-finite values in cross-correlation gradient, setting to zero');
                 cross_corr_grad(~isfinite(cross_corr_grad)) = 0;
             end
-            grad_fW = grad_fW + cross_corr_grad;  
+            grad_fW = grad_fW + gamma * cross_corr_grad;  
         end
 
         % FISTA update
@@ -132,7 +132,7 @@ function [ Xsol, info ] = Xsolve_FISTA_test( Y, A, lambda, mu, X_all_flat, gamma
                 warning('Non-finite cross-correlation cost, setting to zero');
                 cross_corr_cost = 0;
             end
-            costs(it,3) = cross_corr_cost;  % cross-correlation
+            costs(it,3) = gamma * cross_corr_cost;  % cross-correlation
         else
             costs(it,3) = 0;
         end

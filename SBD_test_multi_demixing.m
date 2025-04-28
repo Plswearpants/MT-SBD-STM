@@ -94,9 +94,28 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
     % Add demixing factor
     faint_factor = 1;
     
+    % Compute initial kernel order based on variance of initial guess
+    kernel_variances = zeros(1, kernel_num);
+    for n = 1:kernel_num
+        kernel_variances(n) = var(kernel_initialguess{n}(:));
+    end
+    [~, kernel_order] = sort(kernel_variances, 'descend');
+    
+    % Print the initial kernel processing order
+    fprintf('Initial kernel processing order: ');
+    fprintf('%d ', kernel_order);
+    fprintf('\n');
+    
+    % Print the initial variance of each kernel
+    fprintf('Initial kernel variances: ');
+    for n = 1:kernel_num
+        fprintf('%.6f ', kernel_variances(n));
+    end
+    fprintf('\n');
+    
     for iter = 1:maxIT
         iter_starttime = tic;
-    
+        
         % Compute Y_background (changed to demixing approach)
         Y_sum = zeros(size(Y));
         for m = 1:kernel_num
@@ -106,8 +125,9 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_demixing( Y, k, params, d
         end
         Y_residual = Y - Y_sum;
         
-        % Update each kernel
-        for n = 1:kernel_num
+        % Update each kernel in the current order
+        for idx = 1:kernel_num
+            n = kernel_order(idx);
             % Calculate Yiter for this kernel (changed to demixing approach)
             Yiter = Y_residual + (iter > 1) * (1-1/(faint_factor*iter+1))*convfft2(A{n}, Xiter(:,:,n)) + (1/(faint_factor*iter+1))*Y_sum;
             

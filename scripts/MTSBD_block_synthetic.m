@@ -3,8 +3,8 @@
 SNR = 4;              % Signal-to-noise ratio
 N_obs = 75;           % Observation lattice size (50x50)
 observation_resolution = 3;  % Resolution: 3 pixels per lattice site
-defect_density = 0.005;      % 0.1% defect density
-num_slices = 11;
+defect_density = 0.003;      % 0.1% defect density
+num_slices = 3;
 
 % Generate data with custom parameters
 [Y, A0, X0, params] = properGen_full(SNR, N_obs, observation_resolution, defect_density, ...
@@ -86,13 +86,13 @@ for n = 1:num_kernels
 end
 
 % Choose which demixing method to use
-params.use_Xregulated = true;  % Set to true to use MTSBD_Xregulated, false for SBD_test_multi_demixing
+params.use_Xregulated = false;  % Set to true to use MTSBD_Xregulated, false for SBD_test_multi_demixing
 
 % SBD settings
-initial_iteration = 3;
+initial_iteration = 1;
 maxIT = 10;
 params.phase2 = false;
-params.lambda1 = [5e-2, 5e-2, 3e-2];  % regularization parameter for Phase I
+params.lambda1 = [3e-2, 3e-2, 3e-2, 3e-2];  % regularization parameter for Phase I
 params.kplus = ceil(0.5 * kernel_sizes_ref);
 params.lambda2 = [1e-2, 1e-2, 1e-2];  % FINAL reg. param. value for Phase II
 params.signflip = 0.2;
@@ -103,7 +103,7 @@ params.X0 = X0_ref;
 params.A0 = A0_ref;
 params.xinit = [];
 % Add cross-correlation regularization parameter
-params.gamma = 1e-3;  % Cross-correlation regularization parameter
+params.gamma = 5e-3;  % Cross-correlation regularization parameter
 
 
 % Run SBD on reference slice
