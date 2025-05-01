@@ -1,42 +1,84 @@
+%% Block 1: Load the .3ds data
 
+% INPUTS
+% 1: Data file to load, including file type ('QPI.3ds' for example)
+% 2: Smoothing sigma for current data
 
-%% Block 1: Generate Test Data and Initialize Kernels
-% Generate test set
-SNR = 10;              % Signal-to-noise ratio
-N_obs = 50;           % Observation lattice size 
-observation_resolution = 3;  % Resolution: 3 pixels per lattice site
-defect_density = 0.005;    
-num_slices = 5;
+% OUTPUTS
+% header: Variable containing all experimental parameters
+% I: Current data, smoothed by sigma
+% dIdV: Numerically differentiated current data
+% voltage: Vector of voltages for current
+% midV: Vector on voltages for dIdV/QPI (midpoint of voltage vector)
+% QPI: Fourier transformed dIdV data
 
-% Generate data with custom parameters
-[Y, A0, X0, params] = properGen_full(SNR, N_obs, observation_resolution, defect_density, ...
-    'LDoS_path', 'example_data/LDoS_single_defects_self=0.6_save.mat', ...
-    'num_slices', num_slices);
+% Modified function load3dsall from supplied matlab code from Nanonis
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy_QPI_24nm_3days002.3ds', 5);
+xsize = header.grid_dim(1);
+ysize = header.grid_dim(2);
+elayer = header.points;
+estart = par(1);
+eend = par(2);
+energy_range = linspace(estart, eend, elayer);
 
-% Extract parameters from generated data
-A0_noiseless = params.A0_noiseless;
-num_kernels = params.num_kernels;
-num_slices = params.num_slices; 
+Y = dIdV;
+num_slices = size(Y,3);
+spatial = size(Y,1);
+%% Block 2: Data preprocessing
 
-% Standardize kernel sizes structure
-kernel_sizes = zeros(num_slices, num_kernels, 2);
-for s = 1:num_slices
-    for k = 1:num_kernels
-        kernel_sizes(s,k,:) = size(A0{s,k});
-    end
-end
+%% 2.1: Remove bragg peaks
+[Y]=removeBragg(Y);
 
-% Normalize and visualize
-Y = normalizeBackgroundToZeroMean3D(Y, 'dynamic'); 
-Y = proj2oblique(Y);
+%% 2.2: crop dataset
+mask= maskSquare(Y,0,301);
+Y= gridCropMask(Y, mask);
 
-% Choose reference slice selection method
+%% 2.3 defect masking
 
-% Display the 3D data and let the user input the reference slice
-figure; 
+f1=figure;
 d3gridDisplay(Y,'dynamic');
-title('Select a reference slice');
+index = input('Enter defect slice number: ');
+close(f1);
+
+% methods: 
+% 1. Gaussian window "gw"
+% 2. truncated gaussian gaussian smoothing "tg"
+% 3. thresholding and remove defect features "threshold"
+
+method = 'tg';
+
+switch method
+    case 'gw'
+        % Apply Gaussian window masking
+        [Y_masked, ~] = defect_masking(Y, index);
+    case 'tg'
+        % Apply flat disk mask with Gaussian smoothing
+        [Y_masked, defect_mask] = gaussianMaskDefects(Y,index);
+    case 'threshold'
+        % Apply threshold-based defect masking
+        [Y_masked, defect_mask] = thresholdDefects(Y, index);
+    otherwise
+        error('Unknown defect masking method. Choose "gw", "disk", or "threshold".');
+end
+%% Block 3 data selection 
+rangetype='dynamic';
+f1=figure;
+d3gridDisplay(Y,rangetype);
+params.start_slice = input('Enter QPI starting slice number: ');
+params.end_slice = input('Enter QPI ending slice number: ');
+Y=Y(:,:,params.start_slice:params.end_slice);
+close(f1);
+% update energy range from start and end slice
+energy_range = energy_range(params.start_slice:params.end_slice);
+
+
+%%
+f2=figure;
+d3gridDisplay(Y,rangetype);
 params.ref_slice = input('Enter reference slice number: ');
+num_kernels = input('enter the number of kernels you wish to apply: ');
+close(f2);
+
 
 % Validate the input
 if isempty(params.ref_slice) || ~isnumeric(params.ref_slice) || params.ref_slice < 1 || params.ref_slice > size(Y, 3)
@@ -44,13 +86,13 @@ if isempty(params.ref_slice) || ~isnumeric(params.ref_slice) || params.ref_slice
 end
 fprintf('Using slice %d as reference\n', params.ref_slice);
 
-% Extract reference slice data
+Y = normalizeBackgroundToZeroMean3D(Y, 'dynamic', params.ref_slice);  % normalize Y
+Y = proj2oblique(Y);
+
+% Extract reference slice and initialize kernel
 Y_ref = Y(:,:,params.ref_slice);
-X0_ref = X0;
-A0_ref = cell(1, num_kernels);
-for i = 1:num_kernels
-    A0_ref{i} = A0{params.ref_slice,i};
-end
+Y_ref = normalizeBackgroundToZeroMean3D(Y_ref, 'dynamic');  % normalize Y
+Y_ref = proj2oblique(Y_ref);
 
 % Display the selected reference slice
 figure;
@@ -59,69 +101,84 @@ colorbar;
 title(sprintf('Reference Slice %d', params.ref_slice));
 axis square;
 
-%% Initialize kernels
-window_type = {'gaussian', 2.5};  % Example: gaussian window with alpha
-kernel_sizes_ref = reshape(kernel_sizes(params.ref_slice,:,:),[num_kernels,2]);
-figure;
-for k = 1: num_kernels 
-    subplot(1,num_kernels,k); imagesc(A0{params.ref_slice,k})
-    axis square
-end
-%
-A1 = initialize_kernels(Y_ref, num_kernels, kernel_sizes_ref, 'random', window_type);
+% Initialize kernels
+% draw square on the data to include as many visible ripples of the scattering as possible 
+same_size = 1;
+kerneltype = 'selected';
+window_type = {'gaussian', 1};
+%window_type = '';
 
-% Display initialized kernels
-figure;
-for n = 1:num_kernels
-    subplot(1, num_kernels, n);
-    imagesc(A1{n});
-    title(sprintf('Initial Kernel %d', n));
-    colorbar;
-    axis square;
+if same_size
+    [square_size] = squareDrawSize(Y_ref);
+    kernel_sizes = repmat(square_size,[num_kernels,1]);
+    A1 = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
+else
+    A1 = cell(1, num_kernels);
+    kernel_sizes = zeros(num_kernels, 2); % Store sizes of each kernel [height, width]
+    for k = 1:num_kernels
+        fprintf('Select region for kernel %d/%d\n', k, num_kernels);
+        [square_size,position, mask] = squareDrawSize(target_data);           	% determine kernel size
+        [A1{k}, ~] = gridCropMask(target_data, mask);   % the cropped real data as kernel
+        % Need to put each slice back onto the sphere
+        A1{k} = proj2oblique(A1{k});
+        % Store the kernel size
+        kernel_sizes(k,:) = size(A1{k});
+    end
 end
+
+%% (ESS)noise level determination 
+eta_data = estimate_noise(Y_ref, 'std');  
+
+%% (Opt) determine SNR
+SNR_data= var(A1{1,1}(:))/eta_data;
+fprintf('SNR_data = %d', SNR_data);
 
 %% Block 2: Find Optimal Activation for Reference Slice
 % Set up display functions
 figure;
 dispfun = cell(1, num_kernels);
 for n = 1:num_kernels
-    dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_ref, A1{n}, X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
+    dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_ref, A1{n}, X, A, X, kernel_sizes, kplus, 1);
 end
 
-% Choose which demixing method to use
-params.use_Xregulated = false;  % Set to true to use MTSBD_Xregulated, false for SBD_test_multi_demixing
+% SBD settings.
+miniloop_iteration = 2;
+outerloop_maxIT= 20;
 
-% SBD settings
-initial_iteration = 1;
-maxIT = 20;
+params.lambda1 = [1e-1, 1e-1,0.1,0.1];  % regularization parameter for Phase I
+%params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params.phase2 = false;
-params.lambda1 = [3e-2, 3e-2, 3e-2, 3e-2];  % regularization parameter for Phase I
-params.kplus = ceil(0.5 * kernel_sizes_ref);
-params.lambda2 = [1e-2, 1e-2, 1e-2];  % FINAL reg. param. value for Phase II
+params.kplus = ceil(0.5 * kernel_sizes);
+params.lambda2 = [2e-2, 2e-2];  % FINAL reg. param. value for Phase II
+params.nrefine = 3;
 params.signflip = 0.2;
 params.xpos = true;
 params.getbias = true;
 params.Xsolve = 'FISTA';
-params.X0 = X0_ref;
-params.A0 = A0_ref;
-params.xinit = [];
-% Add cross-correlation regularization parameter
-params.gamma = 5e-2;  % Cross-correlation regularization parameter
 
+% noise variance for computeResidualQuality.m
+params.noise_var = eta_data;
+
+%% Run and save 
+% 2. The fun part
+[Aout, Xout, bout, extras] = MT_SBD(Y_ref, kernel_sizes, params, dispfun, A1, miniloop_iteration, outerloop_maxIT);
+%% 
+% Choose which demixing method to use
+params.use_Xregulated = false;  % Set to true to use MTSBD_Xregulated, false for SBD_test_multi_demixing
 
 % Run SBD on reference slice
 fprintf('Finding optimal activation for reference slice %d...\n', params.ref_slice);
 if params.use_Xregulated
-    [REG_A_ref, REG_X_ref, REG_bout, REG_extras] = MTSBD_synthetic_Xregulated(...
-        Y_ref, kernel_sizes_ref, params, dispfun, A1, initial_iteration, maxIT);
+    [REG_A_ref, REG_X_ref, REG_bout, REG_extras] = MTSBD_Xregulated(...
+        Y_ref, kernel_sizes, params, dispfun, A1, initial_iteration, maxIT);
     % Store reference results
     REG_ref_results = struct();
     REG_ref_results.A = REG_A_ref;
     REG_ref_results.X = REG_X_ref;
     REG_ref_results.extras = REG_extras;
 else
-    [A_ref, X_ref, bout, extras] = MTSBD_synthetic(...
-        Y_ref, kernel_sizes_ref, params, dispfun, A1, initial_iteration, maxIT);
+    [A_ref, X_ref, bout, extras] = SBD_test_multi_demixing(...
+        Y_ref, kernel_sizes, params, dispfun, A1, initial_iteration, maxIT);
     % Store reference results
     ref_results = struct();
     ref_results.A = A_ref;
@@ -362,7 +419,7 @@ end
 
 %% Run for all_slice
 
-params.use_Xregulated = false;
+params.use_Xregulated = true;
 
 
 kernel_sizes_used = squeeze(max(kernel_sizes,[],1));
@@ -386,10 +443,10 @@ for k = 1:num_kernels
 end
 
 if params.use_Xregulated
-    [REG_Aout_ALL, REG_Xout_ALL, REG_bout_ALL, REG_extras_ALL] = MTSBD_synthetic_Xregulated_all_slices(...
+    [REG_Aout_ALL, REG_Xout_ALL, REG_bout_ALL, REG_extras_ALL] = MTSBD_Xregulated_all_slices(...
         Y_used, kernel_sizes_used, params, dispfun, A1_used, initial_iteration, maxIT);
 else
-    [Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_synthetic_all_slice(...
+    [Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_demixing_all_slice(...
         Y_used, kernel_sizes_used, params, dispfun, A1_used, initial_iteration, maxIT);
 end
 

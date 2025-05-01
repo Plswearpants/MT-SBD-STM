@@ -1,5 +1,5 @@
-function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
-    %Multi Type Sparse Blind Deconvolution for real data 
+function [ Aout, Xout, bout, extras ] = MTSBD_synthetic_all_slice( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
+    %SBD Summary of this function goes here
     %
     %   PARAMS STRUCT:
     %   ===============
@@ -64,12 +64,8 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
     else
         xinit = params.xinit;
     end
-    
-    if ~isfield(params, 'noise_var')
-        error('params must contain noise_var for quality metrics');
-    end
-    noise_var = params.noise_var;
-    
+    slices = size(Y,3);
+    spatial = size(Y,1);
     kernel_num = size(k,1);
     mu = 10^-6;
     
@@ -77,65 +73,60 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
     update_config('Xsolve_config.mat', 'MAXIT', Max_iteration, 'Xsolve_config_tunable.mat');
     update_config('Asolve_config.mat','options.maxiter', Max_iteration, 'Asolve_config_tunable.mat');
     
+    % Extract X0 and A0 from params
+    if ~isfield(params, 'X0') || ~isfield(params, 'A0')
+        error('params must contain X0 and A0 for quality metrics');
+    end
+    
+    X0 = params.X0;
+    A0 = params.A0;
+    
     %% Phase I: Initialization and First Iteration with demixing applied
     fprintf('PHASE I: Initialization and First Iteration\n');
     A = kernel_initialguess;
     X_struct = struct();
-    Xiter = zeros([size(Y),kernel_num]);
-    biter = zeros(kernel_num,1);
-    
-    % Initialize new metrics arrays instead of the old ones
-    extras.phase1.quality_metrics = zeros(maxIT, 1);
-    extras.phase1.residuals = zeros([size(Y), maxIT]);
+    Xiter = zeros([spatial,spatial,kernel_num]);
+    biter = zeros(slices, kernel_num);
+
+    % use the initial guess if provided
+    if ~isempty(xinit)
+        for n = 1:kernel_num
+            Xiter(:,:,n) = xinit{n}.X;
+            biter(:,n) = xinit{n}.b;
+        end
+    end
+
+    % Initialize quality metrics arrays in extras
+    extras.phase1.activation_metrics = zeros(maxIT, kernel_num);
+    extras.phase1.kernel_quality_factors = zeros(maxIT, kernel_num);
     
     % Add demixing factor
     faint_factor = 1;
     
-    % Compute initial kernel order based on variance of initial guess
-    kernel_variances = zeros(1, kernel_num);
-    for n = 1:kernel_num
-        kernel_variances(n) = var(kernel_initialguess{n}(:));
-    end
-    [~, kernel_order] = sort(kernel_variances, 'descend');
-    
-    % Print the initial kernel processing order
-    fprintf('Initial kernel processing order: ');
-    fprintf('%d ', kernel_order);
-    fprintf('\n');
-    
-    % Print the initial variance of each kernel
-    fprintf('Initial kernel variances: ');
-    for n = 1:kernel_num
-        fprintf('%.6f ', kernel_variances(n));
-    end
-    fprintf('\n');
-    
+    % Main iteration loop
     for iter = 1:maxIT
         iter_starttime = tic;
-    
-        % Compute Y_background (changed to demixing approach)
+        
+        % Compute Y_background with demixing approach
         Y_sum = zeros(size(Y));
         for m = 1:kernel_num
-            if iter > 1
-                Y_sum = Y_sum + convfft2(A{m}, Xiter(:,:,m));
-            end
+            X_current = Xiter(:,:,m);
+            Y_sum = Y_sum + convfft3(A{m}, X_current(:,:,ones(1,size(Y_sum,3))));
         end
+
         Y_residual = Y - Y_sum;
         
-        % Update each kernel in the current order
-        for idx = 1:kernel_num
-            n = kernel_order(idx);
-            % Calculate Yiter for this kernel (changed to demixing approach)
-            Yiter = Y_residual + (iter > 1) * (1-1/(faint_factor*iter+1))*convfft2(A{n}, Xiter(:,:,n)) + (1/(faint_factor*iter+1))*Y_sum;
-            Y_residual_pre = Y_residual + convfft2(A{n}, Xiter(:,:,n));
-            dispfun1 = @(A, X) dispfun{n}(Y, A, X, k(n,:), []);
+        % Update each kernel
+        for n = 1:kernel_num
+            X_current = Xiter(:,:,n);
+            Yiter = Y_residual + (1-1/(faint_factor*iter+1))*convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3)))) + (1/(faint_factor*iter+1))*Y_sum;
+            dispfun1 = @(A, X) dispfun{n}(Y(:,:,1), A(:,:,1), X, k(n,:), []);
             
+            % Initial X computation only on first iteration if no initial guess is provided
             if iter == 1
                 if isempty(xinit)
-                    % Initial X computation without xinit
                     X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit, xpos);
                 else
-                    % Initial X computation with xinit
                     X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit{n}, xpos);
                 end
             end
@@ -143,14 +134,20 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
             [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A{n}, lambda1(n), Xsolve, X_struct.(['x',num2str(n)]), xpos, getbias, dispfun1);
             
             Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
-            biter(n) = X_struct.(['x',num2str(n)]).b;
-            Y_residual = Y_residual_pre - convfft2(A{n},Xiter(:,:,n));
+            biter(:,n) = X_struct.(['x',num2str(n)]).b;
         end
-    
-        % Compute quality metrics using residual
-        [quality_metric, residual] = computeResidualQuality(Y, A, Xiter, noise_var);
-        extras.phase1.quality_metrics(iter) = quality_metric;
-        extras.phase1.residuals(:,:,iter) = residual;
+        
+        % Compute quality metrics
+        A0_first = cell(size(A0));
+        A_first = cell(size(A));
+        for n = 1:kernel_num
+            A0_first{n} = A0{n}(:,:,1);
+            A_first{n} = A{n}(:,:,1);
+        end
+        
+        [activation_similarity, kernel_similarity] = computeQualityMetrics(X0, Xiter, A0_first, A_first, k);
+        extras.phase1.activation_metrics(iter,:) = activation_similarity;
+        extras.phase1.kernel_quality_factors(iter,:) = kernel_similarity;
         
         iter_runtime = toc(iter_starttime);
         fprintf('Iteration %d: Runtime = %.2fs\n', iter, iter_runtime);
@@ -178,8 +175,8 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
         lam2fac = (lambda2./lambda1).^(1/nrefine);
         
         % Initialize Phase II metrics
-        extras.phase2.quality_metrics = zeros(nrefine + 1, 1);
-        extras.phase2.residuals = zeros([size(Y), nrefine + 1]);
+        extras.phase2.activation_metrics = zeros(nrefine + 1, kernel_num);
+        extras.phase2.kernel_quality_factors = zeros(nrefine + 1, kernel_num);
         
         for i = 1:nrefine + 1
             fprintf('lambda iteration %d/%d: \n', i, nrefine + 1);
@@ -198,7 +195,7 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
                 dispfun2 = @(A, X) dispfun{n}(Y, A, X, k3(n,:), kplus(n,:));
                 [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);
                 
-                % Attempt to 'unshift' the a and x
+                % Attempt to 'unshift" the a and x
                 score = zeros(2*kplus(n,1)+1, 2*kplus(n,2)+1);
                 for tau1 = -kplus(n,1):kplus(n,1)
                     ind1 = tau1+kplus(n,1)+1;
@@ -221,7 +218,7 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
                 extras.phase2.info{n} = info;
             end
             
-            % Compute quality metrics using residual
+            % Evaluate metrics for this refinement
             X2_combined = zeros(size(Y,1), size(Y,2), kernel_num);
             A2_central = cell(1, kernel_num);
             for n = 1:kernel_num
@@ -229,13 +226,20 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
                 A2_central{n} = A2{n}(kplus(n,1)+(1:k(n,1)), kplus(n,2)+(1:k(n,2)));
             end
     
-            [quality_metric, residual] = computeResidualQuality(Y, A2_central, X2_combined, noise_var);
-            extras.phase2.quality_metrics(i) = quality_metric;
-            extras.phase2.residuals(:,:,i) = residual;
+            [activation_similarity, kernel_similarity] = computeQualityMetrics(X0, X2_combined, A0, A2_central, k3);
+            extras.phase2.activation_metrics(i,:) = activation_similarity;
+            extras.phase2.kernel_quality_factors(i,:) = kernel_similarity;
             
-            % Update the results printing section
+            % Print results
             fprintf('Refinement %d Metrics:\n', i);
-            fprintf('Quality Metric: %.3f\n', quality_metric);
+            fprintf('Activation Quality:\n');
+            for n = 1:kernel_num
+                fprintf('Kernel %d - Similarity: %.3f\n', n, activation_similarity(n));
+            end
+            fprintf('Kernel Quality Factors:\n');
+            for n = 1:kernel_num
+                fprintf('Kernel %d: %.3f\n', n, kernel_similarity(n));
+            end
             
             lambda = lambda .* lam2fac;
         end

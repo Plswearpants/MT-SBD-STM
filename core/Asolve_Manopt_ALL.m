@@ -1,4 +1,4 @@
-function [ Aout, Xsol, extras ] = Asolve_Manopt( Y, Ain, lambda, Xsolve, varargin )
+function [ Aout, Xsol, extras ] = Asolve_Manopt_ALL( Y, Ain, lambda, Xsolve, varargin )
 %ASolve_MANOPT     BD using Manopt solvers.
 %   - Core usage:
 %       [ Aout, Xsol, Stats ] = Asolve_Manopt( Y, Ain, lambda, Xsolve)

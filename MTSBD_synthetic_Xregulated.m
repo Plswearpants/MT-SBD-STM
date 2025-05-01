@@ -1,4 +1,4 @@
-function [ Aout, Xout, bout, extras ] = MTSBD_Xregulated( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
+function [ Aout, Xout, bout, extras ] = MTSBD_synthetic_Xregulated( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
     %SBD Summary of this function goes here
     %
     %   PARAMS STRUCT:

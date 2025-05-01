@@ -1,4 +1,4 @@
-function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
+function [ Aout, Xout, bout, extras ] = MTSBD_synthetic( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
     %SBD Summary of this function goes here
     %
     %   PARAMS STRUCT:
@@ -64,8 +64,7 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
     else
         xinit = params.xinit;
     end
-    slices = size(Y,3);
-    spatial = size(Y,1);
+    
     kernel_num = size(k,1);
     mu = 10^-6;
     
@@ -85,17 +84,9 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
     fprintf('PHASE I: Initialization and First Iteration\n');
     A = kernel_initialguess;
     X_struct = struct();
-    Xiter = zeros([spatial,spatial,kernel_num]);
-    biter = zeros(slices, kernel_num);
-
-    % use the initial guess if provided
-    if ~isempty(xinit)
-        for n = 1:kernel_num
-            Xiter(:,:,n) = xinit{n}.X;
-            biter(:,n) = xinit{n}.b;
-        end
-    end
-
+    Xiter = zeros([size(Y),kernel_num]);
+    biter = zeros(kernel_num,1);
+    
     % Initialize quality metrics arrays in extras
     extras.phase1.activation_metrics = zeros(maxIT, kernel_num);
     extras.phase1.kernel_quality_factors = zeros(maxIT, kernel_num);
@@ -103,49 +94,64 @@ function [ Aout, Xout, bout, extras ] = MTSBD_demixing_all_slice( Y, k, params, 
     % Add demixing factor
     faint_factor = 1;
     
-    % Main iteration loop
+    % Compute initial kernel order based on variance of initial guess
+    kernel_variances = zeros(1, kernel_num);
+    for n = 1:kernel_num
+        kernel_variances(n) = var(kernel_initialguess{n}(:));
+    end
+    [~, kernel_order] = sort(kernel_variances, 'descend');
+    
+    % Print the initial kernel processing order
+    fprintf('Initial kernel processing order: ');
+    fprintf('%d ', kernel_order);
+    fprintf('\n');
+    
+    % Print the initial variance of each kernel
+    fprintf('Initial kernel variances: ');
+    for n = 1:kernel_num
+        fprintf('%.6f ', kernel_variances(n));
+    end
+    fprintf('\n');
+    
     for iter = 1:maxIT
         iter_starttime = tic;
         
-        % Compute Y_background with demixing approach
+        % Compute Y_background (changed to demixing approach)
         Y_sum = zeros(size(Y));
         for m = 1:kernel_num
-            X_current = Xiter(:,:,m);
-            Y_sum = Y_sum + convfft3(A{m}, X_current(:,:,ones(1,size(Y_sum,3))));
+            if iter > 1
+                Y_sum = Y_sum + convfft2(A{m}, Xiter(:,:,m));
+            end
         end
-
         Y_residual = Y - Y_sum;
         
-        % Update each kernel
-        for n = 1:kernel_num
-            X_current = Xiter(:,:,n);
-            Yiter = Y_residual + (1-1/(faint_factor*iter+1))*convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3)))) + (1/(faint_factor*iter+1))*Y_sum;
-            dispfun1 = @(A, X) dispfun{n}(Y(:,:,1), A(:,:,1), X, k(n,:), []);
+        % Update each kernel in the current order
+        for idx = 1:kernel_num
+            n = kernel_order(idx);
+            % Calculate Yiter for this kernel (changed to demixing approach)
+            Yiter = Y_residual + (iter > 1) * (1-1/(faint_factor*iter+1))*convfft2(A{n}, Xiter(:,:,n)) + (1/(faint_factor*iter+1))*Y_sum;
+            %Y_residual_pre = Y_residual + convfft2(A{n}, Xiter(:,:,n));
+            dispfun1 = @(A, X) dispfun{n}(Y, A, X, k(n,:), []);
             
-            % Initial X computation only on first iteration if no initial guess is provided
             if iter == 1
                 if isempty(xinit)
-                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit, xpos);
+                % Initial X computation
+                X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit, xpos);
                 else
-                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit{n}, xpos);
+                X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit{n}, xpos);
+                % Or initial A computation 
                 end
-            end
+           end
             
             [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A{n}, lambda1(n), Xsolve, X_struct.(['x',num2str(n)]), xpos, getbias, dispfun1);
             
             Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
-            biter(:,n) = X_struct.(['x',num2str(n)]).b;
+            biter(n) = X_struct.(['x',num2str(n)]).b;
+            %Y_residual = Y_residual_pre - convfft2(A{n},Xiter(:,:,n));
         end
-        
-        % Compute quality metrics
-        A0_first = cell(size(A0));
-        A_first = cell(size(A));
-        for n = 1:kernel_num
-            A0_first{n} = A0{n}(:,:,1);
-            A_first{n} = A{n}(:,:,1);
-        end
-        
-        [activation_similarity, kernel_similarity] = computeQualityMetrics(X0, Xiter, A0_first, A_first, k);
+    
+        % Keep the same quality metrics computation
+        [activation_similarity, kernel_similarity] = computeQualityMetrics(X0, Xiter, A0, A, k);
         extras.phase1.activation_metrics(iter,:) = activation_similarity;
         extras.phase1.kernel_quality_factors(iter,:) = kernel_similarity;
         

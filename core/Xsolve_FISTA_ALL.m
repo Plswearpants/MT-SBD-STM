@@ -1,4 +1,4 @@
-function [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu, varargin )
+function [ Xsol, info ] = Xsolve_FISTA_ALL( Y, A, lambda, mu, varargin )
 %XSOLVE_FISTA   Solve for X using FISTA method
 %   - Core usage:
 %       [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu )
