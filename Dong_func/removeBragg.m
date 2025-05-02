@@ -24,7 +24,7 @@ close;
 % let the user select the bragg peaks with circular ROI(by symmetry, also apply it to the center symmetric point in the reciprocal space)
 % Display the selected slice for user to select Bragg peaks
 figure;
-imagesc(log(abs(QPI(:,:,slice)))); axis image; colormap hot; title('Select Bragg peaks to apply Gaussian window');
+imagesc(QPI_logabs(:,:,slice)); axis image; colormap hot; title('Select Bragg peaks to apply Gaussian window');
 
 % Initialize variables to store ROI information
 num_peaks = input('Enter the number of unique Bragg peaks to process: ');
@@ -60,7 +60,7 @@ for i = 1:num_peaks
     dist_to_left = center(1) - 1;
     dist_to_right = cols - center(1);
     dist_to_top = center(2) - 1;
-    dist_to_bottom = rows - center(2);
+    dist_to_bottom =rows - center(2);
     
     % The symmetric point should have the same distances but to opposite edges
     sym_center_x = cols - dist_to_left;  % Same distance from right edge

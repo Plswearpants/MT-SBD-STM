@@ -24,23 +24,30 @@ energy_range = linspace(estart, eend, elayer);
 Y = dIdV;
 num_slices = size(Y,3);
 spatial = size(Y,1);
-%% Block 2: Data preprocessing
-
-%% 2.1: Remove bragg peaks
+%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Block 2: Data preprocessing
+Y_original = Y;
+rangetype='dynamic';
+%% 2.0: Normalize background 
+ [Y] = normalizeBackgroundToZeroMean3D(Y, rangetype, 286);
+%% 2.1: Correct streak
+[Y]=RemoveStreaks(Y);
+figure;
+d3gridDisplay(Y,rangetype);
+%% 2.2: Remove bragg peaks
 [Y]=removeBragg(Y);
-
-%% 2.2: crop dataset
+close;
+%% 2.3: crop dataset
 mask= maskSquare(Y,0,301);
 Y= gridCropMask(Y, mask);
 
-%% 2.3 defect masking
+%% 2.4 defect masking
 
 f1=figure;
 d3gridDisplay(Y,'dynamic');
 index = input('Enter defect slice number: ');
 close(f1);
 
-% methods: 
+%% methods: 
 % 1. Gaussian window "gw"
 % 2. truncated gaussian gaussian smoothing "tg"
 % 3. thresholding and remove defect features "threshold"

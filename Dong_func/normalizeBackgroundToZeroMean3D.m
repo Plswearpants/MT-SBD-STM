@@ -68,8 +68,4 @@ for i = 1:k
     % Store the normalized slice back into the 3D array
     normalized_data_3d(:, :, i) = normalized_data;
 end
-
-% Display the entire 3D normalized dataset using the d3gridDisplay function
-d3gridDisplay(normalized_data_3d, rangeType);
-
 end
