@@ -1,4 +1,4 @@
-function [Y_masked, defect_mask] = gaussianMaskDefects(Y, threshold_slice)
+function [Y_masked, defect_centers] = gaussianMaskDefects(Y, threshold_slice, num_defect_type)
     % Apply Gaussian masking to defects in 3D data
     % g_M(r,E) = g(r,E) × (1 - M(r - r_0, σ))
     % M is a truncated Gaussian with maximum value = 0.99, it is applied within 1 sigma from the defect center
@@ -22,20 +22,24 @@ function [Y_masked, defect_mask] = gaussianMaskDefects(Y, threshold_slice)
     end
     validateattributes(threshold_slice, {'numeric'}, {'scalar', 'integer', 'positive', '<=', size(Y,3)});
     
+    defect_centers = cell([1,num_defect_type]);
     % Get defect centers
-    defect_centers = selectDefectCenters(Y(:,:,threshold_slice));
-    if isempty(defect_centers)
-        error('No defect centers selected');
+    Y_masked= Y;
+    for i = 1:num_defect_type
+        fprintf('Select activation for defect type %d\n',i);
+        defect_centers{i} = selectDefectCenters(Y_masked(:,:,threshold_slice));
+        if isempty(defect_centers)
+            disp('No defect centers selected');
+        end
+        % Define radii for each defect
+        sigmas = defineDefectRadii(Y(:,:,threshold_slice), defect_centers{i});
+        % Apply Gaussian masks
+        [Y_masked, ~] = applyGaussianMasks(Y_masked, defect_centers{i}, sigmas);
+        % Display results
+        displayResults(Y, Y_masked, threshold_slice, defect_centers{i}, sigmas);
     end
+
     
-    % Define radii for each defect
-    sigmas = defineDefectRadii(Y(:,:,threshold_slice), defect_centers);
-    
-    % Apply Gaussian masks
-    [Y_masked, defect_mask] = applyGaussianMasks(Y, defect_centers, sigmas);
-    
-    % Display results
-    displayResults(Y, Y_masked, threshold_slice, defect_centers, sigmas);
 end
 
 function slice_num = selectSlice(Y)
@@ -50,8 +54,8 @@ function centers = selectDefectCenters(slice_data)
     % Let user select defect centers
     f = figure('Name', 'Defect Selection', 'Position', [100, 100, 800, 600]);
     imagesc(slice_data);
-    colormap('jet'); colorbar; axis image;
-    caxis([min(slice_data(:)), max(slice_data(:))]);
+    colormap('parula'); colorbar; axis image;
+    clim([min(slice_data(:)), max(slice_data(:))]);
     title('Select defect centers (click points, press Enter when done)');
     
     [x, y] = getpts;
@@ -65,7 +69,7 @@ function sigmas = defineDefectRadii(slice_data, defect_centers)
     f = figure('Name', 'Define Radii', 'Position', [100, 100, 800, 600]);
     
     % Default radius (can be adjusted as needed)
-    default_radius = 10;
+    default_radius = 0.1;
     pre_rad = default_radius;
     for i = 1:size(defect_centers, 1)
         % Display current defect
@@ -76,8 +80,7 @@ function sigmas = defineDefectRadii(slice_data, defect_centers)
         
         center = defect_centers(i,:);
         hold on;
-        plot(center(1), center(2), 'r+', 'MarkerSize', 15, 'LineWidth', 2);
-        plot(center(1), center(2), 'ro', 'MarkerSize', 20, 'LineWidth', 2);
+        plot(center(1), center(2), 'r+', 'MarkerSize', 1, 'LineWidth', 0.2);
         
         % Create radius display and edit box
         radius_text = uicontrol('Style', 'text', ...
@@ -88,26 +91,28 @@ function sigmas = defineDefectRadii(slice_data, defect_centers)
             'Position', [70, 10, 60, 20], ...
             'Callback', @(src,evt) updateRadius(src, center));
         
+        % Create Confirm button
+        confirm_button = uicontrol('Style', 'pushbutton', ...
+            'String', 'Confirm', ...
+            'Position', [140, 10, 80, 20], ...
+            'Callback', @(src,evt) uiresume(f));
+        
         % Create circle with default radius
         h = drawcircle('Center', center, 'Radius', pre_rad, 'Color', 'r', 'FaceAlpha', 0.1);
         
         % Add listeners to keep circle centered and update radius display
         addlistener(h, 'ROIMoved', @(src,evt) handleROIMoved(src, center, radius_edit));
         
-        % Add double-click listener to proceed
-        addlistener(h, 'ROIClicked', @(src,evt) handleClick(src, evt));
-        
-        % Wait for double-click
+        % Wait for button press
         uiwait(f);
         
         % Get final radius and compute sigma
         radius = h.Radius;
-        sigmas(i) = radius/2;
+        sigmas(i) = radius;
         pre_rad = radius;
         % Draw final circle
         th = 0:pi/50:2*pi;
         plot(radius * cos(th) + center(1), radius * sin(th) + center(2), 'r--', 'LineWidth', 1.5);
-
     end
     close(f);
     
@@ -128,14 +133,6 @@ function sigmas = defineDefectRadii(slice_data, defect_centers)
             delete(findobj(gca, 'Type', 'images.roi.Circle'));
             h = drawcircle('Center', center, 'Radius', new_radius, 'Color', 'r', 'FaceAlpha', 0.1);
             addlistener(h, 'ROIMoved', @(src,evt) handleROIMoved(src, center, radius_edit));
-            addlistener(h, 'ROIClicked', @(src,evt) handleClick(src, evt));
-        end
-    end
-    
-    function handleClick(src, evt)
-        % Handle double-click to proceed
-        if strcmp(evt.SelectionType, 'double')
-            uiresume(f);
         end
     end
 end
@@ -154,18 +151,17 @@ function [Y_masked, defect_mask] = applyGaussianMasks(Y, defect_centers, sigmas)
             distance_squared = (X-r0(1)).^2 + (Y_coord-r0(2)).^2;
             distance = sqrt(distance_squared);
             
-            % Create smooth transition around 3 sigma
             sigma = sigmas(j);
-            transition_width = 0.1 * sigma;  % Width of the transition region
-            transition_start = 2.9 * sigma;  % Start transition before 3 sigma
-            transition_end = 3 * sigma;   % End transition after 3 sigma
+            % Create smooth transition around 3 sigma
+            step_loc = 2*sigma;  % Start transition before 3 sigma
+            step_shapeness = 10;
+            % Create smooth step function as a function handle
+            smooth_step_fn = @(d, loc, shape) 0.5 + 0.5*(tanh(-shape*(d-loc)));
+            smooth_step = smooth_step_fn(distance, step_loc, step_shapeness);
             
-            % Create smooth step function
-            smooth_step = 0.5 * (1 + tanh((transition_end - distance) / transition_width));
-            
-            % Create gaussian with smooth transition
+            %Create gaussian with smooth transition
             gaussian = 0.99 * exp(-distance_squared/(2*sigma^2)) .* smooth_step;
-            
+
             % Update mask
             mask = mask .* (1 - gaussian);
         end

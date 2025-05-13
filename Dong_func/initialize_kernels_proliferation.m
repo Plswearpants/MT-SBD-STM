@@ -132,6 +132,19 @@ function A1 = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, w
         
         % Extract region
         selected_kernel = Y(y1:y2, x1:x2);
+        % Ensure selected_kernel matches target_kernel_size
+        current_size = size(selected_kernel);
+        target_size = target_kernel_size; % [height, width]
+
+        % Pad if too small
+        pad_height = max(0, target_size(1) - current_size(1));
+        pad_width  = max(0, target_size(2) - current_size(2));
+        if pad_height > 0 || pad_width > 0
+            selected_kernel = padarray(selected_kernel, [pad_height, pad_width], 'replicate', 'post');
+        end
+
+        % Crop if too large
+        selected_kernel = selected_kernel(1:target_size(1), 1:target_size(2));
         
         % Project onto the oblique manifold and apply window
         A1{n} = proj2oblique(selected_kernel);

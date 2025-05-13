@@ -55,6 +55,15 @@ for i = 1:num_peaks
     semi_axes = h.SemiAxes;
     rotation = h.RotationAngle;
     
+    % Validate and ensure independent control of semi-axes
+    if length(semi_axes) ~= 2
+        error('Semi-axes must be a 2-element vector for independent control');
+    end
+    
+    % Display current semi-axes values
+    disp(['Current semi-axes: [', num2str(semi_axes(1)), ', ', num2str(semi_axes(2)), ']']);
+    disp('You can adjust these values independently using the ellipse handles');
+    
     % Calculate center-symmetric point
     % Calculate distances from original point to edges
     dist_to_left = center(1) - 1;

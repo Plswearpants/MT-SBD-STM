@@ -1,11 +1,9 @@
-
-
 %% Block 1: Generate Test Data and Initialize Kernels
 % Generate test set
-SNR = 10;              % Signal-to-noise ratio
+SNR = 5;              % Signal-to-noise ratio
 N_obs = 50;           % Observation lattice size 
 observation_resolution = 3;  % Resolution: 3 pixels per lattice site
-defect_density = 0.005;    
+defect_density = 0.002;    
 num_slices = 5;
 
 % Generate data with custom parameters
