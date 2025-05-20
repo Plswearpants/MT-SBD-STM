@@ -13,7 +13,7 @@
 % QPI: Fourier transformed dIdV data
 
 % Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy001.3ds', 1);
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('QPImap012.3ds', 5);
 xsize = header.grid_dim(1);
 ysize = header.grid_dim(2);
 elayer = header.points;
@@ -56,7 +56,6 @@ close(f1);
 % 1. Gaussian window "gw"
 % 2. truncated gaussian gaussian smoothing "tg"
 % 3. thresholding and remove defect features "threshold"
-
 method = 'tg';
 
 switch method
@@ -65,7 +64,7 @@ switch method
         [data_masked, ~] = defect_masking(data_carried, index);
     case 'tg'
         % Apply flat disk mask with Gaussian smoothing
-        [data_masked, ~] = gaussianMaskDefects(data_carried,index, num_defect_type);
+        [~, defect_loc] = gaussianMaskDefects(Y,index, num_defect_type);
     case 'threshold'
         % Apply threshold-based defect masking
         [data_masked, defect_mask] = thresholdDefects(data_carried, index);
@@ -145,7 +144,7 @@ real_space_direction = 'vertical';
 data_carried = data_plane;
 
 %% 2.4: crop dataset
-mask= maskSquare(data_carried,0,8);
+mask= maskSquare(data_carried,0,slice_normalize);
 data_cropped= gridCropMask(data_carried, mask);
 data_carried = data_cropped;
 
@@ -153,7 +152,7 @@ data_carried = data_cropped;
 [Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
 %% 3pre: Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('ZrSiTe_preprocessed_selected.mat', 'Y', 'data_masked', 'data_cropped', 'data_braggremoved', 'data_original', "energy_range",'energy_selected','defect_loc')
+save('LiFeAs_preprocessed_selected.mat', 'Y', 'data_masked', 'data_cropped', 'data_braggremoved', 'data_original', "energy_range",'energy_selected','defect_loc')
 
 
 %% Block 3 data selection 
@@ -185,7 +184,7 @@ end
 [Y] = normalizeBackgroundToZeroMean3D(Y, rangetype, 1);
 %% 4_pre Pick reference slice and Initialize reference kernels
 f2=figure;
-%d3gridDisplay(Y,rangetype);
+d3gridDisplay(Y,rangetype);
 params.ref_slice = input('Enter reference slice number: ');
 num_kernels = input('enter the number of kernels you wish to apply: ');
 close(f2);
@@ -220,8 +219,8 @@ window_type = {'gaussian', 2.5};
 
 
 if same_size
-    %[square_size] = squareDrawSize(Y_ref);
-    square_size=[65,65];
+    [square_size] = squareDrawSize(Y_ref);
+    %square_size=[65,65];
     kernel_sizes = repmat(square_size,[num_kernels,1]);
     A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
 else
@@ -229,8 +228,8 @@ else
     kernel_sizes = zeros(num_kernels, 2); % Store sizes of each kernel [height, width]
     for k = 1:num_kernels
         fprintf('Select region for kernel %d/%d\n', k, num_kernels);
-        [square_size,position, mask] = squareDrawSize(target_data);           	% determine kernel size
-        [A1_ref{k}, ~] = gridCropMask(target_data, mask);   % the cropped real data as kernel
+        [square_size,position, mask] = squareDrawSize(Y_ref);           	% determine kernel size
+        [A1_ref{k}, ~] = gridCropMask(Y_ref, mask);   % the cropped real data as kernel
         % Need to put each slice back onto the sphere
         A1_ref{k} = proj2oblique(A1_ref{k});
         % Store the kernel size
@@ -255,9 +254,9 @@ end
 
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 7;
+outerloop_maxIT= 12;
 params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [3e-2, 3e-2,0.03, 0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.1, 0.1,0.1, 0.03];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.5 * kernel_sizes);
@@ -268,10 +267,10 @@ params_ref.xpos = true;
 params_ref.getbias = true;
 params_ref.Xsolve = 'FISTA';
 
-% for k = 1:num_kernels
-%     params_ref.xinit{k}.X = X_ref(:,:,k);
-%     params_ref.xinit{k}.b = extras_ref.phase1.biter(k); 
-% end
+for k = 1:num_kernels
+    params_ref.xinit{k}.X = X0(:,:,k);
+    params_ref.xinit{k}.b = 0; 
+end
 % noise variance for computeResidualQuality.m
 params_ref.noise_var = eta_data;
 
@@ -288,17 +287,18 @@ for i =1:length(defect_loc)
     X0(:,:,i)=locationsToMask(defect_loc{i},[size(Y_ref,1),size(Y_ref,2)]);
 end 
 
-[X_ref_aligned, ~, ~] = alignActivationMaps(X0, X_ref_pad, kernel_sizes);
+[X_ref_aligned, ~, ~] = alignActivationMaps(X0, X_ref, kernel_sizes);
 [X_similarity, ~] = computeActivationSimilarity(X0, X_ref_aligned, kernel_sizes,1);
 %% Pad the A_ref to be size defined by user, normalize and use them as the A1
-target_size = [80, 80];
-kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
+%target_size = [110, 110];
+%kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
+kernel_sizes_pad = [[120,120];[120,120];[65,65]];
 A_pre_pad = A_ref;
 A1_ref = cell(1, num_kernels);
 for k = 1:num_kernels
     sz = size(A_pre_pad{k});
-    pad_h = target_size(1) - sz(1);
-    pad_w = target_size(2) - sz(2);
+    pad_h = kernel_sizes_pad(k,1) - sz(1);
+    pad_w = kernel_sizes_pad(k,2) - sz(2);
 
     % Calculate pre- and post-padding for centering
     pre_h = floor(pad_h / 2);
@@ -338,7 +338,7 @@ end
 miniloop_iteration = 1;
 outerloop_maxIT= 5;
 
-params_ref.lambda1 = [3.5e-2, 3.5e-2,0.03,0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.2, 0.2,0.2,0.03];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.5 * kernel_sizes);
@@ -357,7 +357,7 @@ params_ref.noise_var = eta_data;
 %% Visualize Padded result 
 visualizeRealResult(Y_ref,A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad);
 %% Save the padded ones 
-padfilename = sprintf('MTSBD_ZrSiTe_%f meV.mat',1000*params_ref.energy);
+padfilename = sprintf('MTSBD_LiFeAs_%f meV.mat',1000*params_ref.energy);
 %save(padfilename,'Y_ref','A_ref_pad', 'X_ref_pad', 'b_ref_pad', 'extras_ref_pad', 'params_ref');
 save(padfilename,'Y_ref','A_ref', 'X_ref', 'b_ref', 'extras_ref', 'params_ref');
 %% Block 3: Find Most Isolated Points and Initialize Kernels
@@ -370,7 +370,7 @@ if strcmp(type, 'ref_kernel_sizes')
 elseif strcmp(type, 'kernel_sizes_cap')
     target_kernel_sizes = squeeze(max(kernel_sizes,[],1));
 elseif strcmp(type, 'kernel_sizes_all')
-    target_kernel_sizes = kernel_sizes_pad;
+    target_kernel_sizes = kernel_sizes;
 end
 
 % Get defect positions from X_ref
@@ -392,7 +392,8 @@ for k = 1:num_kernels
     ylabel('Frequency (log scale)');
     
     % Add vertical line for threshold
-    threshold = max(X_ref(:,:,k),[],'all')/10;
+    %threshold = max(X_ref(:,:,k),[],'all')/10;
+    threshold = 0;
     hold on;
     xline(threshold, 'r--', 'Threshold');
     hold off;
@@ -581,7 +582,7 @@ eta_data3d = estimate_noise3D(Y, 'std');
 miniloop_iteration = 1;
 outerloop_maxIT= 12;
 
-params.lambda1 = [3e-2, 3e-2,0.03];  % regularization parameter for Phase I
+params.lambda1 = [0.2, 0.2,0.03];  % regularization parameter for Phase I
 %params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params.phase2 = false;
 params.kplus = ceil(0.5 * kernel_sizes);
@@ -731,7 +732,7 @@ else
 end
 
 %% Save results
-save('ZrSiTe_slices_higher_resolution.mat', 'Y_used', 'Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras');
+save('LiFeAs_slices.mat', 'Y_used', 'Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras', 'energy_selected');
 
 %% convert Aout_ALL to cell format
 Aout_ALL_cell = cell(num_slices, num_kernels);

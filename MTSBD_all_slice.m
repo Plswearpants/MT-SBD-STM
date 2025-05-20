@@ -114,6 +114,7 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
         for n = 1:kernel_num
             X_current = Xiter(:,:,n);
             Yiter = Y_residual + (1-1/(faint_factor*iter+1))*convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3)))) + (1/(faint_factor*iter+1))*Y_sum;
+            Y_residual_pre = Y_residual + convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3))));
             dispfun1 = @(A, X) dispfun{n}(Y(:,:,1), A(:,:,1), X, k(n,:), []);
             
             % Initial X computation only on first iteration if no initial guess is provided
@@ -129,7 +130,8 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
             
             Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
             biter(:,n) = X_struct.(['x',num2str(n)]).b;
-            
+            temp = Xiter(:,:,n);
+            Y_residual = Y_residual_pre - convfft3(A{n},temp(:,:,ones(1,size(Y_sum,3))));
             fprintf('kernel %d finished', n)
         end
         [quality_metric, residual] = computeResidualQuality(Y, A, Xiter, noise_var);

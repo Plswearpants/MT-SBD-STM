@@ -24,18 +24,21 @@ function visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     figure('Name', 'Image Comparison');
     subplot(131);
     imagesc(Y);
+    colormap(invgray);
     title('Original Image');
     colorbar;
     axis image;
     
     subplot(132);
     imagesc(Y_rec);
+    colormap(invgray);
     title('Reconstructed Image');
     colorbar;
     axis image;
     
     subplot(133);
     imagesc(Y_res);
+    colormap(invgray);
     title('Residual Image');
     colorbar;
     axis image;
@@ -55,6 +58,7 @@ function visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     % 2. Auto-contrasted Residual
     figure('Name', 'Auto-contrasted Residual');
     imagesc(Y_res);
+    colormap(invgray);
     title('Auto-contrasted Residual');
     colorbar;
     axis image;
@@ -69,6 +73,7 @@ function visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     % Plot Q-space of original image
     subplot(2, num_kernels + 1, num_kernels + 2);
     imagesc(Q_Y_avg);
+    colormap(invgray);
     title('Q-space (Original)');
     colorbar;
     axis image;
@@ -81,12 +86,14 @@ function visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     
         subplot(2, num_kernels + 1, k + 1);
         imagesc(A_ref{k});
+        colormap(invgray);
         title(['Kernel ' num2str(k) ' (Original)']);
         colorbar;
         axis square;
 
         subplot(2, num_kernels + 1, num_kernels+ k + 2);
         imagesc(Q_kernel_avg);
+        colormap(invgray);
         title(['Q-space (Kernel ' num2str(k) ')']);
         colorbar;
         axis image;

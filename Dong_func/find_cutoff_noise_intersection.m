@@ -121,6 +121,28 @@ function [M, M_pixels,fig_handle] = find_cutoff_noise_intersection(rho_single, S
         axis square
         
         sgtitle(sprintf('QPI Pattern Analysis (SNR=%.1f)', SNR));
+
+        figure; 
+        hold on
+        plot(r_lattice, avg_intensity, 'b-', 'LineWidth', 1, 'DisplayName', 'Signal');
+        hold on
+        plot(r_lattice, signal_envelope, 'r-', 'LineWidth', 1, 'DisplayName', 'Signal Envelope');
+        % Plot all detected peaks
+        plot(peak_locs/pixels_per_lattice, peak_values, 'ko', 'MarkerFaceColor', 'y', ...
+            'DisplayName', 'Peaks');
+        % Plot noise levels
+        plot(xlim, [noise_level noise_level], 'g--', 'LineWidth', 1.5, ...
+            'DisplayName', 'Noise Level');
+        plot(xlim, [-noise_level -noise_level], 'g--', 'LineWidth', 1.5, ...
+            'HandleVisibility', 'off');
+        % Plot cutoff
+        plot([M M], ylim, 'k--', 'LineWidth', 1.5, 'DisplayName', 'Cutoff');
+        title('Radial Profile with Peaks and Noise Level');
+        xlabel('Radius (lattice units)');
+        ylabel('Intensity');
+        grid on;
+        legend('Location', 'best');
+        hold off
     else
         fig_handle = [];
     end
