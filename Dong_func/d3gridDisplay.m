@@ -25,7 +25,7 @@ LDoS_noisy = dataHealing(LDoS_noisy);
 LDoS_noisy = normalizeData(LDoS_noisy);
 
 % Load colormap
-load('InverseGray', 'invgray');
+load('invgray');
 map = gray;
 
 % Determine global min and max values if global range is selected

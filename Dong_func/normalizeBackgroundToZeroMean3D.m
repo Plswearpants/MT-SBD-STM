@@ -1,4 +1,4 @@
-function [normalized_data_3d, background_mean, comment] = normalizeBackgroundToZeroMean3D(data_3d, rangeType, selected_slice)
+function [normalized_data_3d, background_info, comment] = normalizeBackgroundToZeroMean3D(data_3d, rangeType, selected_slice)
 % Normalizes each slice of a 3D dataset by subtracting the mean of a user-selected background area.
 %   This function allows the user to interactively select a background region from a slice in a 3D dataset.
 %   For every slice, the mean of the selected background area is subtracted from each slice in the 3D dataset, 
@@ -11,13 +11,13 @@ function [normalized_data_3d, background_mean, comment] = normalizeBackgroundToZ
 %
 % Returns:
 %   normalized_data_3d   The 3D data array with each slice normalized to the selected background area.
-%   background_mean      The mean of the selected background area.
+%   background_info      [mean, variance] of the selected background area.
 %   comment              Comment for logging the function call.
 %
 % August 2024 - Dong Chen
 %
 % Example:
-%   [normalized_data_3d, background_mean, comment] = normalizeBackgroundToZeroMean3D(data_3d, 'global');
+%   [normalized_data_3d, background_info, comment] = normalizeBackgroundToZeroMean3D(data_3d, 'global');
 %   This example normalizes the entire 3D dataset based on the background mean from the first slice.
 
 arguments
@@ -55,6 +55,7 @@ normalized_data_3d = zeros(size(data_3d));  % Use exact same size as input
 for i = 1:k
     background = data_3d(y_min:y_max, x_min:x_max, i);
     background_mean = mean(background(:));
+    background_info = [background_mean, var(background(:))];
     
     % Extract the current slice
     data = data_3d(:, :, i);

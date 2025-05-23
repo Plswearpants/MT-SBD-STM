@@ -1,20 +1,23 @@
-function [corrected_data, streak_mask] = interpolateLocalStreaks(Y, slice_idx, min_value)
+function [corrected_data, streak_mask, streak_indices] = interpolateLocalStreaks(Y, slice_idx, min_value, provided_streak_indices)
 %INTERPOLATELOCALSTREAKS Interactive streak interpolating tool using Laplacian and neighbor interpolation
-%   [corrected_data, streak_mask] = interpolateLocalStreaks(Y, slice_idx, min_value) processes the specified slice of 3D data Y
-%   using two methods: Laplacian-based detection followed by neighbor interpolation
+%   [corrected_data, streak_mask, streak_indices] = interpolateLocalStreaks(Y, slice_idx, min_value, provided_streak_indices)
+%   processes the specified slice of 3D data Y using two methods: Laplacian-based detection followed by neighbor interpolation
 %
 %   Inputs:
 %       Y - 3D data array
 %       slice_idx - Index of the slice to process (default: 150)
 %       min_value - Optional minimum value for streak detection (default: interactive)
+%       provided_streak_indices - Optional Nx2 array of [row,col] indices for streak points
 %
 %   Outputs:
 %       corrected_data - The corrected image data
 %       streak_mask - Binary mask indicating detected streaks
+%       streak_indices - Nx2 array of [row,col] indices for streak points
 %
 %   Example:
-%       [corrected, mask] = interpolateLocalStreaks(Y, 150);
-%       [corrected, mask] = interpolateLocalStreaks(Y, 150, 0.5);
+%       [corrected, mask, indices] = interpolateLocalStreaks(Y, 150);
+%       [corrected, mask, indices] = interpolateLocalStreaks(Y, 150, 0.5);
+%       [corrected, mask] = interpolateLocalStreaks(Y, 150, [], provided_indices);
 
 % Initialize
 if nargin < 2
@@ -25,10 +28,39 @@ if nargin < 3
 end
 corrected_data = [];
 streak_mask = [];
+streak_indices = [];
 
 % Process data
 data = Y(:,:,slice_idx);
 [rows, cols] = size(data);
+
+% If streak indices are provided, directly apply interpolation
+if nargin >= 4 && ~isempty(provided_streak_indices)
+    corrected_data = data;
+    streak_mask = false(size(data));
+    streak_indices = provided_streak_indices;
+    
+    % Process each provided streak point
+    for i = 1:size(provided_streak_indices, 1)
+        r = provided_streak_indices(i,1);
+        c = provided_streak_indices(i,2);
+        
+        % Check if both left and right neighbors are also streak points
+        left_check = ismember([r, c-1], provided_streak_indices, 'rows');
+        right_check = ismember([r, c+1], provided_streak_indices, 'rows');
+        
+        % Only process if both neighbors are streak points
+        if left_check && right_check
+            % Get neighboring points
+            neighbors = [data(r,c-1), data(r,c+1)];
+            
+            % Replace streak with mean of neighbors
+            corrected_data(r,c) = mean(neighbors);
+            streak_mask(r,c) = true;
+        end
+    end
+    return;
+end
 
 % Compute Laplacian
 L = zeros(size(data));
@@ -66,6 +98,7 @@ axis square;
 hold on;
 h_min_line = xline(min(L_mag(:)), 'r-', 'LineWidth', 2);
 h_max_line = xline(max(L_mag(:)), 'r-', 'LineWidth', 2);
+xlim([min(L_mag(:)), max(L_mag(:))/2]);  % Set x-axis range to half of max
 hold off;
 
 % Plot corrected image
@@ -89,7 +122,7 @@ end
 uicontrol(panel, 'Style', 'text', 'String', 'Min:', 'Position', [10, 5, 40, 20]);
 min_slider = uicontrol(panel, 'Style', 'slider', ...
     'Min', min(L_mag(:)), ...
-    'Max', max(L_mag(:)), ...
+    'Max', max(L_mag(:))/2, ...
     'Value', initial_min, ...
     'Position', [60, 5, 300, 20]);
 
@@ -117,7 +150,8 @@ waitfor(h_fig);
 if evalin('base', 'exist(''temp_corrected_data'', ''var'')')
     corrected_data = evalin('base', 'temp_corrected_data');
     streak_mask = evalin('base', 'temp_streak_mask');
-    evalin('base', 'clear temp_corrected_data temp_streak_mask');
+    streak_indices = evalin('base', 'temp_streak_indices');
+    evalin('base', 'clear temp_corrected_data temp_streak_mask temp_streak_indices');
 end
 
 end
@@ -131,10 +165,13 @@ function finish(src, h_corrected, h_plot)
     % Get the results
     corrected_data = get(h_corrected, 'CData');
     streak_mask = get(h_plot, 'CData') >= min_val & get(h_plot, 'CData') <= max_val;
+    [streak_rows, streak_cols] = find(streak_mask);
+    streak_indices = [streak_rows, streak_cols];
     
     % Store results in base workspace
     assignin('base', 'temp_corrected_data', corrected_data);
     assignin('base', 'temp_streak_mask', streak_mask);
+    assignin('base', 'temp_streak_indices', streak_indices);
     
     % Close the figure
     close(gcf);
@@ -154,8 +191,9 @@ function updateContrast(src, ~, h_plot, min_text, h_corrected, data, L_mag, h_mi
     % Find streaks
     streak_mask = L_mag >= min_val & L_mag <= max_val;
     [streak_rows, streak_cols] = find(streak_mask);
+    streak_indices = [streak_rows, streak_cols];
     
-    % Correct streaks using old method
+    % Correct streaks using consistent method
     corrected = data;
     [rows, cols] = size(data);
     
@@ -165,30 +203,30 @@ function updateContrast(src, ~, h_plot, min_text, h_corrected, data, L_mag, h_mi
         c = streak_cols(i);
         
         % Check if both left and right neighbors are also streak points
-        left_check = ismember([r, c-1], [streak_rows, streak_cols], 'rows');
-        right_check = ismember([r, c+1], [streak_rows, streak_cols], 'rows');
+        left_check = ismember([r, c-1], streak_indices, 'rows');
+        right_check = ismember([r, c+1], streak_indices, 'rows');
         
         % Only process if both neighbors are streak points
         if left_check && right_check
             % Get neighboring points
-            neighbors = [];
-            if c > 1
-                neighbors = [neighbors, data(r,c-1)];
-            end
-            if c < cols
-                neighbors = [neighbors, data(r,c+1)];
-            end
+            neighbors = [data(r,c-1), data(r,c+1)];
             
             % Replace streak with mean of neighbors
-            if ~isempty(neighbors)
-                corrected(r,c) = mean(neighbors);
-            end
+            corrected(r,c) = mean(neighbors);
         end
     end
     
     % Update display
     set(h_corrected, 'CData', corrected);
-    caxis(h_corrected.Parent, [min(data(:)), max(data(:))]);
+    
+    % Calculate new contrast limits based on corrected data
+    valid_data = corrected(~isnan(corrected) & ~isinf(corrected));
+    if ~isempty(valid_data)
+        new_min = min(valid_data(:));
+        new_max = max(valid_data(:));
+        caxis(h_corrected.Parent, [new_min, new_max]);
+    end
+    
     set(done_button, 'UserData', struct('min_val', min_val, 'max_val', max_val));
     drawnow;
 end

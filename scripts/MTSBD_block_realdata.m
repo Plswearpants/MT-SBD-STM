@@ -13,7 +13,7 @@
 % QPI: Fourier transformed dIdV data
 
 % Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('QPImap012.3ds', 5);
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy008.3ds', 5);
 xsize = header.grid_dim(1);
 ysize = header.grid_dim(2);
 elayer = header.points;
@@ -168,7 +168,7 @@ num_slices = size(Y,3);
 %% 3.2 Local streak removal and interpolation 
 Y_local_removed = zeros(size(Y));
 for s = 1:size(Y,3)
-    [~, var_list, low_list] = streak_correction(Y(:,:,s),'left');
+    [~, var_list, low_list] = streak_correction(Y(:,:,s),'both');
     figure; plot(low_list, var_list);
     [min_var,min_idx]=min(var_list);
     min_low = low_list(min_idx);

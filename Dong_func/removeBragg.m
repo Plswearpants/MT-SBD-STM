@@ -33,8 +33,8 @@ QPI_removed = QPI;
 
 % Get image dimensions
 [rows, cols, ~] = size(QPI);
-center_row = ceil(rows/2);
-center_col = ceil(cols/2);
+center_row = floor(rows/2)+1;
+center_col = floor(cols/2)+1;
 
 % Create a mask for Gaussian window application (start with all ones)
 mask = ones(rows, cols);
@@ -64,16 +64,9 @@ for i = 1:num_peaks
     disp(['Current semi-axes: [', num2str(semi_axes(1)), ', ', num2str(semi_axes(2)), ']']);
     disp('You can adjust these values independently using the ellipse handles');
     
-    % Calculate center-symmetric point
-    % Calculate distances from original point to edges
-    dist_to_left = center(1) - 1;
-    dist_to_right = cols - center(1);
-    dist_to_top = center(2) - 1;
-    dist_to_bottom =rows - center(2);
-    
-    % The symmetric point should have the same distances but to opposite edges
-    sym_center_x = cols - dist_to_left;  % Same distance from right edge
-    sym_center_y = rows - dist_to_top;   % Same distance from bottom edge
+    % Calculate center-symmetric point(q-space inversion symmetry)
+    sym_center_x = 2*center_row - center(1);  
+    sym_center_y = 2*center_col - center(2);   
     
     % Create center point markers first
     hold on;
@@ -91,8 +84,8 @@ for i = 1:num_peaks
     sym_h.InteractionsAllowed = 'all';
     
     % Add listeners to keep ellipses and markers synchronized
-    addlistener(h, 'MovingROI', @(src,evt) updateEllipseAndMarker(src, sym_h, sym_marker, rows, cols));
-    addlistener(sym_h, 'MovingROI', @(src,evt) updateEllipseAndMarker(src, h, h_marker, rows, cols));
+    addlistener(h, 'MovingROI', @(src,evt) updateEllipseAndMarker(src, sym_h, sym_marker, h_marker, rows, cols));
+    addlistener(sym_h, 'MovingROI', @(src,evt) updateEllipseAndMarker(src, h, h_marker, sym_marker, rows, cols));
     
     % Wait for user to confirm both ellipses
     disp('Adjust the ellipses as needed. Press any key when done...');
@@ -167,7 +160,7 @@ subplot(2,2,3); imagesc(Y_removed(:,:,slice)); axis image; title('Filtered Image
 subplot(2,2,4); imagesc(log(abs(QPI_removed(:,:,slice)))); axis image; title('Filtered FFT with Gaussian Window');
 
 % Add helper function for ellipse and marker synchronization
-function updateEllipseAndMarker(src, target, marker, rows, cols)
+function updateEllipseAndMarker(src, target, marker, src_marker, rows, cols)
     % Calculate distances from source point to edges
     dist_to_left = src.Center(1) - 1;
     dist_to_top = src.Center(2) - 1;
@@ -180,7 +173,9 @@ function updateEllipseAndMarker(src, target, marker, rows, cols)
     target.SemiAxes = src.SemiAxes;
     target.RotationAngle = src.RotationAngle;
     
-    % Update marker position
+    % Update both marker positions
+    src_marker.XData = src.Center(1);
+    src_marker.YData = src.Center(2);
     marker.XData = sym_center(1);
     marker.YData = sym_center(2);
 end
