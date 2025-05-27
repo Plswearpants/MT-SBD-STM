@@ -23,7 +23,7 @@ function [normalized_data_3d, background_info, comment] = normalizeBackgroundToZ
 arguments
     data_3d
     rangeType
-    selected_slice = 1  % Default to slice 1 if not provided
+    selected_slice = floor(size(data_3d, 3)/2)  % Default to slice 1 if not provided
 end
 
 % LOG comment of function call

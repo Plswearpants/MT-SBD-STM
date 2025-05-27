@@ -1,5 +1,3 @@
-%%
-function_path_analyzer()
 %% Block 1: Load the .3ds data
 
 % INPUTS
@@ -56,9 +54,6 @@ figure;
 d3gridDisplay(data_carried, rangetype);
 ref_slice = input('reference streaks slices: ');
 [~, ~, streak_indices] = interpolateLocalStreaks(data_carried, ref_slice, []);
-%% a check for last block
-[pp] = interpolateLocalStreaks(data_carried, ref_slice, [], streak_indices);
-figure; imagesc(pp); axis square
 %% Prolifeartion streak removal for all slices at the same indices
 data_corrected = zeros(size(data_carried));
 for s = 1:size(data_carried,3)

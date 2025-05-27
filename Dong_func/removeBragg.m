@@ -14,7 +14,8 @@ QPI = zeros(size(Y));
 for i = 1:size(Y,3)
     QPI(:,:,i) = fftshift(fft2(Y(:,:,i)));
 end
-QPI_logabs = log(abs(QPI));
+%QPI_logabs = log(abs(QPI));
+QPI_logabs = (abs(QPI));
 % display the QPI
 figure;
 d3gridDisplay(QPI_logabs, 'dynamic');
