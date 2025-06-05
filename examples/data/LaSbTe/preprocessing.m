@@ -34,7 +34,7 @@ slice_normalize = input('slice to normalize: ');
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 %% remove bad columns
 list_remove = [48,49];
-data_carried(:,list_remove,:)=0; % can put list_remove in the middle dimension.
+data_carried(:,list_remove,:)= 0; % can put list_remove in the middle dimension.
 Left = data_carried(:,1:47,:);
 Right = data_carried(:,50:132,:);
 

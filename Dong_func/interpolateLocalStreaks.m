@@ -31,7 +31,7 @@ streak_mask = [];
 streak_indices = [];
 
 % Process data
-data = Y(:,:,slice_idx);
+data = single(Y(:,:,slice_idx));  % Convert to single precision
 [rows, cols] = size(data);
 
 % If streak indices are provided, directly apply interpolation
@@ -40,35 +40,24 @@ if nargin >= 4 && ~isempty(provided_streak_indices)
     streak_mask = false(size(data));
     streak_indices = provided_streak_indices;
     
-    % Process each provided streak point
-    for i = 1:size(provided_streak_indices, 1)
-        r = provided_streak_indices(i,1);
-        c = provided_streak_indices(i,2);
-        
-        % Check if both left and right neighbors are also streak points
-        left_check = ismember([r, c-1], provided_streak_indices, 'rows');
-        right_check = ismember([r, c+1], provided_streak_indices, 'rows');
-        
-        % Only process if both neighbors are streak points
-        if left_check && right_check
-            % Get neighboring points
-            neighbors = [data(r,c-1), data(r,c+1)];
-            
-            % Replace streak with mean of neighbors
-            corrected_data(r,c) = mean(neighbors);
-            streak_mask(r,c) = true;
-        end
-    end
+    % Vectorized processing of provided streak points
+    valid_streaks = false(size(data));
+    valid_streaks(sub2ind(size(data), provided_streak_indices(:,1), provided_streak_indices(:,2))) = true;
+    
+    % Check for valid streaks (both neighbors are streak points)
+    valid_streaks(:,1) = false;  % Remove first column
+    valid_streaks(:,end) = false;  % Remove last column
+    valid_streaks = valid_streaks & circshift(valid_streaks, [0 -1]) & circshift(valid_streaks, [0 1]);
+    
+    % Apply interpolation
+    corrected_data(valid_streaks) = (data(circshift(valid_streaks, [0 -1])) + data(circshift(valid_streaks, [0 1]))) / 2;
+    streak_mask = valid_streaks;
     return;
 end
 
-% Compute Laplacian
-L = zeros(size(data));
-% Shift left and right
-data_left = [zeros(rows,1), data(:,1:end-1)];
-data_right = [data(:,2:end), zeros(rows,1)];
-% Compute Laplacian using matrix operations
-L = data_left + data_right - 2*data;
+% Compute Laplacian efficiently
+L = zeros(size(data), 'single');
+L(:,2:end-1) = data(:,1:end-2) + data(:,3:end) - 2*data(:,2:end-1);
 L_mag = abs(L);
 
 % Create figure and store its handle
@@ -76,7 +65,7 @@ h_fig = figure('Name', 'X-Direction Laplacian Streak Removal Analysis', 'Positio
 
 % Plot original data
 subplot(2, 2, 1);
-imagesc(data);
+h_orig = imagesc(data);
 title('Original Data');
 axis square;
 colormap parula;
@@ -98,7 +87,7 @@ axis square;
 hold on;
 h_min_line = xline(min(L_mag(:)), 'r-', 'LineWidth', 2);
 h_max_line = xline(max(L_mag(:)), 'r-', 'LineWidth', 2);
-xlim([min(L_mag(:)), max(L_mag(:))/2]);  % Set x-axis range to half of max
+xlim([min(L_mag(:)), max(L_mag(:))/2]);
 hold off;
 
 % Plot corrected image
@@ -112,7 +101,7 @@ colorbar;
 % Create controls
 panel = uipanel('Position', [0.1, 0.02, 0.8, 0.05]);
 
-% Initialize slider value based on whether min_value was provided
+% Initialize slider value
 initial_min = min(L_mag(:));
 if ~isempty(min_value)
     initial_min = min_value;
@@ -137,8 +126,8 @@ done_button = uicontrol(panel, 'Style', 'pushbutton', ...
     'Position', [450, 5, 100, 40], ...
     'Callback', @(src,event) finish(src, h_corrected, h_plot));
 
-% Set up callbacks
-set(min_slider, 'Callback', @(src,event) updateContrast(src, event, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button));
+% Set up callbacks with debounce
+set(min_slider, 'Callback', @(src,event) debouncedUpdate(src, event, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button));
 
 % Initialize display
 updateContrast(min_slider, [], h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button);
@@ -177,6 +166,19 @@ function finish(src, h_corrected, h_plot)
     close(gcf);
 end
 
+function debouncedUpdate(src, event, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button)
+    persistent lastUpdate
+    if isempty(lastUpdate)
+        lastUpdate = tic;
+    end
+    
+    % Only update if 0.1 seconds have passed since last update
+    if toc(lastUpdate) > 0.1
+        updateContrast(src, event, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button);
+        lastUpdate = tic;
+    end
+end
+
 function updateContrast(src, ~, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button)
     % Get current values
     min_val = get(src, 'Value');
@@ -184,51 +186,29 @@ function updateContrast(src, ~, h_plot, min_text, h_corrected, data, L_mag, h_mi
     
     % Update display
     caxis(h_plot.Parent, [min_val, max_val]);
+    caxis(h_corrected.Parent, [min(data(:)), max(data(:))]);
     set(min_text, 'String', sprintf('%.3f', min_val));
     set(h_min_line, 'Value', min_val);
     set(h_max_line, 'Value', max_val);
     
-    % Find streaks
+    % Find streaks using vectorized operations
     streak_mask = L_mag >= min_val & L_mag <= max_val;
-    [streak_rows, streak_cols] = find(streak_mask);
-    streak_indices = [streak_rows, streak_cols];
     
-    % Correct streaks using consistent method
+    % Process valid streaks
+    valid_streaks = streak_mask;
+    valid_streaks(:,1) = false;  % Remove first column
+    valid_streaks(:,end) = false;  % Remove last column
+    valid_streaks = valid_streaks & circshift(streak_mask, [0 -1]) & circshift(streak_mask, [0 1]);
+    
+    % Apply interpolation
     corrected = data;
-    [rows, cols] = size(data);
-    
-    % Process each streak point
-    for i = 1:length(streak_rows)
-        r = streak_rows(i);
-        c = streak_cols(i);
-        
-        % Check if both left and right neighbors are also streak points
-        left_check = ismember([r, c-1], streak_indices, 'rows');
-        right_check = ismember([r, c+1], streak_indices, 'rows');
-        
-        % Only process if both neighbors are streak points
-        if left_check && right_check
-            % Get neighboring points
-            neighbors = [data(r,c-1), data(r,c+1)];
-            
-            % Replace streak with mean of neighbors
-            corrected(r,c) = mean(neighbors);
-        end
-    end
+    corrected(valid_streaks) = (data(circshift(valid_streaks, [0 -1])) + data(circshift(valid_streaks, [0 1]))) / 2;
     
     % Update display
     set(h_corrected, 'CData', corrected);
     
-    % Calculate new contrast limits based on corrected data
-    valid_data = corrected(~isnan(corrected) & ~isinf(corrected));
-    if ~isempty(valid_data)
-        new_min = min(valid_data(:));
-        new_max = max(valid_data(:));
-        caxis(h_corrected.Parent, [new_min, new_max]);
-    end
-    
+    % Store values for finish function
     set(done_button, 'UserData', struct('min_val', min_val, 'max_val', max_val));
-    drawnow;
 end
 
 
