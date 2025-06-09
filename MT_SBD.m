@@ -133,7 +133,7 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
             if iter == 1
                 if isempty(xinit)
                     % Initial X computation without xinit
-                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit, xpos);
+                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, [], xpos);
                 else
                     % Initial X computation with xinit
                     X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit{n}, xpos);
@@ -184,28 +184,54 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
         for i = 1:nrefine + 1
             fprintf('lambda iteration %d/%d: \n', i, nrefine + 1);
             
+            % Initialize Y_sum to zero before accumulation
+            Y_sum = zeros(size(Y));
             % Standard Y_residual calculation (no demixing)
             for m = 1:kernel_num
                 Y_sum = Y_sum + convfft2(A2{m}, X2_struct.(['x',num2str(m)]).X);
             end
             Y_residual = Y - Y_sum;
     
-            for n = 1:kernel_num
+            for idx = 1:kernel_num
+                n = kernel_order(idx);
                 fprintf('Processing kernel %d, lambda = %.1e: \n', n, lambda(n));
                 % Calculate Yiter without demixing
                 Yiter = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
+                Y_residual_pre = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
                 
                 dispfun2 = @(A, X) dispfun{n}(Y, A, X, k3(n,:), kplus(n,:));
                 [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);
                 
                 % Attempt to 'unshift' the a and x
                 score = zeros(2*kplus(n,1)+1, 2*kplus(n,2)+1);
+                % Calculate center position
+                center_y = kplus(n,1) + 1;
+                center_x = kplus(n,2) + 1;
+                
                 for tau1 = -kplus(n,1):kplus(n,1)
                     ind1 = tau1+kplus(n,1)+1;
                     for tau2 = -kplus(n,2):kplus(n,2)
                         ind2 = tau2+kplus(n,2)+1;
+                        
+                        % Get the selected region
                         temp = A2{n}(ind1:(ind1+k(n,1)-1), ind2:(ind2+k(n,2)-1));
-                        score(ind1,ind2) = norm(temp(:), 1);
+                        
+                        % Calculate decay for each point in temp relative to its center
+                        [y_coords, x_coords] = ndgrid(1:size(temp,1), 1:size(temp,2));
+                        center_y_temp = (size(temp,1)+1)/2;
+                        center_x_temp = (size(temp,2)+1)/2;
+                        
+                        % Calculate normalized distances from center (0 to 1)
+                        dist_y = abs(y_coords - center_y_temp) / center_y_temp;
+                        dist_x = abs(x_coords - center_x_temp) / center_x_temp;
+                        dist = sqrt(dist_y.^2 + dist_x.^2);
+                        
+                        % Calculate decay factor (1 at center, 0.5 at edges)
+                        decay = exp(-log(2) * dist);  % exp(-log(2)) = 0.5 at dist=1
+                        
+                        % Apply decay to temp
+                        temp_decayed = temp .* decay;
+                        score(ind1,ind2) = norm(temp_decayed(:), 1);
                     end
                 end
                 [temp,ind1] = max(score); [~,ind2] = max(temp);
@@ -213,6 +239,9 @@ function [ Aout, Xout, bout, extras ] = MT_SBD( Y, k, params, dispfun, kernel_in
                 A2{n} = circshift(A2{n},-tau);
                 X2_struct.(['x',num2str(n)]).X = circshift(X2_struct.(['x',num2str(n)]).X,tau);
                 X2_struct.(['x',num2str(n)]).W = circshift(X2_struct.(['x',num2str(n)]).W,tau);
+    
+                % Update Y_residual after processing this kernel
+                Y_residual = Y_residual_pre - convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
     
                 % Save phase 2 extras
                 extras.phase2.A{n} = A2{n};

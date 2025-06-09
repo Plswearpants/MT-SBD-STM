@@ -19,33 +19,11 @@ function visualizeResults(Y, A0, Aout, X0, Xout, bout, extras, indices)
         kernel_size(n,:) = size(A0{n});
     end
     
-    % Compute reconstructed image
-    Y_reconstructed = zeros(size(Y));
-    for i = 1:num_kernels
-        Y_reconstructed = Y_reconstructed + convfft2(Aout{i}, Xout(:,:,i));
-        %Y_reconstructed = Y_reconstructed + bout(i);  % Add bias term
-    end
-
     % Prepare index string if indices provided
     idx_str = '';
     if nargin > 7 && ~isempty(indices)
         idx_str = sprintf('\nDataset # %d, Parameter Set # %d', indices(1), indices(2));
     end
-
-    % 1. Original vs Reconstructed Full Image
-    figure('Name', 'Full Image Comparison');
-    subplot(121);
-    imagesc(Y);
-    title(['Original Image']);
-    colorbar;
-    axis image;
-
-    subplot(122);
-    imagesc(Y_reconstructed);
-    title(['Reconstructed Image']);
-    colorbar;
-    axis image;
-    sgtitle(['Original vs Reconstructed Image' idx_str]);
 
     % 2. Kernel Quality Analysis (using QPI patterns)
     fprintf('\nAnalyzing Kernel Quality with QPI Patterns:\n');
@@ -76,6 +54,28 @@ function visualizeResults(Y, A0, Aout, X0, Xout, bout, extras, indices)
         fprintf('  Similarity Score: %.4f\n', activation_metrics.similarity(k));
         fprintf('  Offset: [%d, %d]\n', activation_metrics.offset(k,1), activation_metrics.offset(k,2));
     end
+
+    % Compute reconstructed image using aligned maps
+    Y_reconstructed = zeros(size(Y));
+    for i = 1:num_kernels
+        Y_reconstructed = Y_reconstructed + convfft2(Aout{i}, aligned_maps.Xout_aligned(:,:,i));
+        %Y_reconstructed = Y_reconstructed + bout(i);  % Add bias term
+    end
+
+    % 1. Original vs Reconstructed Full Image
+    figure('Name', 'Full Image Comparison');
+    subplot(121);
+    imagesc(Y);
+    title(['Original Image']);
+    colorbar;
+    axis image;
+
+    subplot(122);
+    imagesc(Y_reconstructed);
+    title(['Reconstructed Image']);
+    colorbar;
+    axis image;
+    sgtitle(['Original vs Reconstructed Image' idx_str]);
 
     % 4. Convergence History
     figure('Name', 'Convergence History');

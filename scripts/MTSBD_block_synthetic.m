@@ -1,15 +1,16 @@
 %% Block 1: Generate Test Data and Initialize Kernels
 % Generate test set
 SNR = 5;              % Signal-to-noise ratio
-N_obs = 50;           % Observation lattice size 
-observation_resolution = 5;  % Resolution: 3 pixels per lattice site
-defect_density = 0.005;    
-num_slices = 3;
+N_obs = 30;           % Observation lattice size 
+observation_resolution = 3;  % Resolution: 3 pixels per lattice site
+defect_density = 0.006;    
+num_slices = 2;
 
 % Generate data with custom parameters
 [Y, A0, X0, params] = properGen_full(SNR, N_obs, observation_resolution, defect_density, ...
     'LDoS_path', 'example_data/LDoS_single_defects_self=0.6_save.mat', ...
-    'num_slices', num_slices);
+    'num_slices', num_slices, ...
+    'vis', 1);
 
 % Extract parameters from generated data
 A0_noiseless = params.A0_noiseless;
@@ -90,12 +91,13 @@ end
 params.use_Xregulated = false;  % Set to true to use MTSBD_Xregulated, false for SBD_test_multi_demixing
 
 % SBD settings
-initial_iteration = 1;
-maxIT = 20;
-params.phase2 = false;
+initial_iteration = 3;
+maxIT = 4;
+params.phase2 = true;  % Enable Phase 2
 params.lambda1 = [3e-2, 3e-2, 3e-2, 3e-2];  % regularization parameter for Phase I
 params.kplus = ceil(0.5 * kernel_sizes_ref);
-params.lambda2 = [1e-2, 1e-2, 1e-2];  % FINAL reg. param. value for Phase II
+params.lambda2 = [1e-2, 1e-2, 1e-2, 1e-2];  % FINAL reg. param. value for Phase II
+params.nrefine = 3;  % Number of refinements for Phase II
 params.signflip = 0.2;
 params.xpos = true;
 params.getbias = true;
@@ -105,7 +107,6 @@ params.A0 = A0_ref;
 params.xinit = [];
 % Add cross-correlation regularization parameter
 params.gamma = 5e-2;  % Cross-correlation regularization parameter
-
 
 % Run SBD on reference slice
 fprintf('Finding optimal activation for reference slice %d...\n', params.ref_slice);

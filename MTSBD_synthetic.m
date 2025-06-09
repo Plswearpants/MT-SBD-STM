@@ -130,7 +130,7 @@ function [ Aout, Xout, bout, extras ] = MTSBD_synthetic( Y, k, params, dispfun, 
             n = kernel_order(idx);
             % Calculate Yiter for this kernel (changed to demixing approach)
             Yiter = Y_residual + (iter > 1) * (1-1/(faint_factor*iter+1))*convfft2(A{n}, Xiter(:,:,n)) + (1/(faint_factor*iter+1))*Y_sum;
-            %Y_residual_pre = Y_residual + convfft2(A{n}, Xiter(:,:,n));
+            Y_residual_pre = Y_residual + convfft2(A{n}, Xiter(:,:,n));
             dispfun1 = @(A, X) dispfun{n}(Y, A, X, k(n,:), []);
             
             if iter == 1
@@ -147,7 +147,7 @@ function [ Aout, Xout, bout, extras ] = MTSBD_synthetic( Y, k, params, dispfun, 
             
             Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
             biter(n) = X_struct.(['x',num2str(n)]).b;
-            %Y_residual = Y_residual_pre - convfft2(A{n},Xiter(:,:,n));
+            Y_residual = Y_residual_pre - convfft2(A{n},Xiter(:,:,n));
         end
     
         % Keep the same quality metrics computation
@@ -183,39 +183,165 @@ function [ Aout, Xout, bout, extras ] = MTSBD_synthetic( Y, k, params, dispfun, 
         % Initialize Phase II metrics
         extras.phase2.activation_metrics = zeros(nrefine + 1, kernel_num);
         extras.phase2.kernel_quality_factors = zeros(nrefine + 1, kernel_num);
+        extras.phase2.A = cell(1, kernel_num);
+        extras.phase2.X = cell(1, kernel_num);
+        extras.phase2.b = zeros(kernel_num, 1);
+        extras.phase2.info = cell(1, kernel_num);
         
         for i = 1:nrefine + 1
             fprintf('lambda iteration %d/%d: \n', i, nrefine + 1);
             
+            % Initialize Y_sum to zero before accumulation
+            Y_sum = zeros(size(Y));
             % Standard Y_residual calculation (no demixing)
             for m = 1:kernel_num
                 Y_sum = Y_sum + convfft2(A2{m}, X2_struct.(['x',num2str(m)]).X);
             end
             Y_residual = Y - Y_sum;
     
-            for n = 1:kernel_num
+            for idx = 1:kernel_num
+                n = kernel_order(idx);
                 fprintf('Processing kernel %d, lambda = %.1e: \n', n, lambda(n));
                 % Calculate Yiter without demixing
                 Yiter = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
+                Y_residual_pre = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
                 
                 dispfun2 = @(A, X) dispfun{n}(Y, A, X, k3(n,:), kplus(n,:));
                 [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);
                 
                 % Attempt to 'unshift" the a and x
                 score = zeros(2*kplus(n,1)+1, 2*kplus(n,2)+1);
+                % Calculate center position
+                center_y = kplus(n,1) + 1;
+                center_x = kplus(n,2) + 1;
+                
                 for tau1 = -kplus(n,1):kplus(n,1)
                     ind1 = tau1+kplus(n,1)+1;
                     for tau2 = -kplus(n,2):kplus(n,2)
                         ind2 = tau2+kplus(n,2)+1;
+                        
+                        % Get the selected region
                         temp = A2{n}(ind1:(ind1+k(n,1)-1), ind2:(ind2+k(n,2)-1));
+                        
+                        % Calculate decay for each point in temp relative to its center
+                        [y_coords, x_coords] = ndgrid(1:size(temp,1), 1:size(temp,2));
+                        center_y_temp = (size(temp,1)+1)/2;
+                        center_x_temp = (size(temp,2)+1)/2;
+                        
+                        % Calculate normalized distances from center (0 to 1)
+                        dist_y = abs(y_coords - center_y_temp) / center_y_temp;
+                        dist_x = abs(x_coords - center_x_temp) / center_x_temp;
+                        dist = sqrt(dist_y.^2 + dist_x.^2);
+                        
+                        % Calculate decay factor (1 at center, 0.5 at edges)
+                        decay = exp(-log(2) * dist);  % exp(-log(2)) = 0.5 at dist=1
+                        
+                        % Apply decay to temp
+                        temp_decayed = temp .* decay;
                         score(ind1,ind2) = norm(temp(:), 1);
                     end
                 end
                 [temp,ind1] = max(score); [~,ind2] = max(temp);
                 tau = [ind1(ind2) ind2]-kplus(n,:)-1;
+                
+                % Visualize the process for the first iteration of Phase II
+                if i == 1
+                    % First figure for kernel visualization
+                    figure('Position', [100, 100, 1500, 400]);
+                    
+                    % Plot original kernel
+                    subplot(1,5,1);
+                    imagesc(A{n});
+                    %title(sprintf('Original Kernel %d', n));
+                    colorbar;
+                    axis equal tight;
+                    
+                    % Initialize padded kernel centered
+                    k3 = k + 2*kplus;
+                    A2_padded = zeros(k3);
+                    % Place kernel at center
+                    center_y = kplus(n,1) + 1;
+                    center_x = kplus(n,2) + 1;
+                    A2_padded(center_y+(1:k(n,1)), center_x+(1:k(n,2))) = A{n};
+                    
+                    % Plot padded kernel
+                    subplot(1,5,2);
+                    imagesc(A2_padded);
+                    %title(sprintf('Padded Kernel %d', n));
+                    colorbar;
+                    axis equal tight;
+                    
+                    % Plot updated kernel before shifting
+                    subplot(1,5,3);
+                    imagesc(A2{n});
+                    %title(sprintf('Updated Kernel %d (Asolve)', n));
+                    colorbar;
+                    axis equal tight;
+                    
+                    % Plot score heatmap
+                    subplot(1,5,4);
+                    imagesc(score);
+                    %title(sprintf('Score Heatmap Kernel %d', n));
+                    colorbar;
+                    axis equal tight;
+                    hold on;
+                    plot(ind2, ind1(ind2), 'rx', 'MarkerSize', 10, 'LineWidth', 2);
+                    hold off;
+                    
+                    % Plot final truncated kernel
+                    A2_shifted = circshift(A2{n},-tau);
+                    A2_truncated = A2_shifted(kplus(n,1)+(1:k(n,1)), kplus(n,2)+(1:k(n,2)));
+                    subplot(1,5,5);
+                    imagesc(A2_truncated);
+                    %title(sprintf('Final Truncated Kernel %d', n));
+                    colorbar;
+                    axis equal tight;
+                    
+                    % Add overall title
+                    %sgtitle(sprintf('Kernel %d Shifting Process (Phase II, Iteration 1)', n));
+                    
+                    % Second figure for activation map visualization
+                    figure('Position', [100, 550, 1500, 400]);
+                    
+                    % Plot original activation map
+                    subplot(1,4,1);
+                    imagesc(X2_struct.(['x',num2str(n)]).X);
+                    title(sprintf('Original Activation Map %d', n));
+                    colorbar;
+                    axis equal tight;
+                    
+                    % Plot activation map after shifting
+                    X_shifted = circshift(X2_struct.(['x',num2str(n)]).X, tau);
+                    subplot(1,4,2);
+                    imagesc(X_shifted);
+                    title(sprintf('Shifted Activation Map %d', n));
+                    colorbar;
+                    axis equal tight;
+                    
+                    % Plot Y_residual before and after
+                    subplot(1,4,3);
+                    imagesc(Y_residual_pre);
+                    title(sprintf('Y Residual Before Shift %d', n));
+                    colorbar;
+                    axis equal tight;
+                    
+                    subplot(1,4,4);
+                    imagesc(Y_residual);
+                    title(sprintf('Y Residual After Shift %d', n));
+                    colorbar;
+                    axis equal tight;
+                    
+                    % Add overall title
+                    sgtitle(sprintf('Activation Map and Residual Shifting Process (Phase II, Iteration 1)'));
+                end
+                
+                % Apply shift
                 A2{n} = circshift(A2{n},-tau);
                 X2_struct.(['x',num2str(n)]).X = circshift(X2_struct.(['x',num2str(n)]).X,tau);
                 X2_struct.(['x',num2str(n)]).W = circshift(X2_struct.(['x',num2str(n)]).W,tau);
+    
+                % Update Y_residual after processing this kernel
+                Y_residual = Y_residual_pre - convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
     
                 % Save phase 2 extras
                 extras.phase2.A{n} = A2{n};

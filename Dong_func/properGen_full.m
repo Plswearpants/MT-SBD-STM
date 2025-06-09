@@ -14,6 +14,7 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
     % Optional Inputs:
     %   LDoS_path: Path to LDoS simulation data
     %   num_slices: Number of consecutive slices per block (default: 3)
+    %   vis: Boolean flag to show intermediate visualization steps (default: false)
     %
     % Outputs:
     %   Y: Final observation (pN_obs x pN_obs x num_slices pixels)
@@ -71,6 +72,7 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
     p.addRequired('defect_density');
     p.addParameter('LDoS_path', 'example_data/LDoS_sim.mat');
     p.addParameter('num_slices', 3);
+    p.addParameter('vis', false);
     p.parse(varargin{:});
     
     % Extract parameters
@@ -80,6 +82,7 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
     rho_d = p.Results.defect_density;
     LDoS_path = p.Results.LDoS_path;
     num_slices = p.Results.num_slices;
+    vis = p.Results.vis;
     
     % Validate parameters
     if SNR <= 0
@@ -203,6 +206,28 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
         % Resize cutoff pattern to match observation scale
         target_size(k,:) = 2*floor(M*p_scale) + 1;  % Ensure odd dimensions
         rho_single_resized{k} = imresize(rho_single_cutoff, target_size(k,:));
+
+        % Visualize intermediate steps if requested
+        if vis
+            figure('Name', sprintf('Step 1: Single Defect Processing - Slice %d', k));
+            subplot(1,3,1);
+            imagesc(rho_single(:,:,k));
+            title('Original Single Defect Pattern');
+            colorbar;
+            axis square;
+            
+            subplot(1,3,2);
+            imagesc(rho_single_cutoff);
+            title(sprintf('Cropped Pattern (M=%d)', M));
+            colorbar;
+            axis square;
+            
+            subplot(1,3,3);
+            imagesc(rho_single_resized{k});
+            title(sprintf('Resized Pattern (%dx%d)', target_size(k,1), target_size(k,2)));
+            colorbar;
+            axis square;
+        end
     end
 
     for b = 1:num_kernels
@@ -226,6 +251,22 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
         % Upsample X to match observation resolution
         X0(:,:,b) = upsample_with_zero_blocks(X, p_scale);
         
+        % Visualize activation map generation if requested
+        if vis
+            figure('Name', sprintf('Step 2: Activation Map Generation - Block %d', b));
+            subplot(1,2,1);
+            imagesc(X);
+            title(sprintf('Original Activation Map (N=%d)', N_obs));
+            colorbar;
+            axis square;
+            
+            subplot(1,2,2);
+            imagesc(X0(:,:,b));
+            title(sprintf('Upsampled Map (pN=%d)', N_obs*p_scale));
+            colorbar;
+            axis square;
+        end
+        
         % Handle periodic boundary conditions
         block_indices = mod(block_indices-1, total_slices) + 1;
             
@@ -236,19 +277,61 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
         end
     end
     
-
-    
     % create Y from A0 and X0 by convolving A0{s,:} with X0(:,:,s)
     Y_clean = zeros(N_obs*p_scale, N_obs*p_scale, num_slices);
     for s = 1:num_slices
         for b = 1:num_kernels
             Y_clean(:,:,s) = Y_clean(:,:,s) + convfft2(A0_noiseless{s,b}, squeeze(X0(:,:,b)));
+            
+            % Visualize convolution steps if requested
+            if vis
+                figure('Name', sprintf('Step 3: Convolution - Slice %d, Block %d', s, b));
+                subplot(2,2,1);
+                imagesc(A0_noiseless{s,b});
+                title('Kernel');
+                colorbar;
+                axis square;
+                
+                subplot(2,2,2);
+                imagesc(squeeze(X0(:,:,b)));
+                title('Activation Map');
+                colorbar;
+                axis square;
+                
+                subplot(2,2,3);
+                imagesc(convfft2(A0_noiseless{s,b}, squeeze(X0(:,:,b))));
+                title('Individual Convolution');
+                colorbar;
+                axis square;
+                
+                subplot(2,2,4);
+                imagesc(Y_clean(:,:,s));
+                title('Cumulative Result');
+                colorbar;
+                axis square;
+            end
         end
     end
     
     % Add noise based on SNR
     eta = var(Y_clean(:)) / SNR;
     Y = Y_clean + sqrt(eta) * randn(size(Y_clean));
+    
+    % Visualize noise addition if requested
+    if vis
+        figure('Name', 'Step 4: Noise Addition');
+        subplot(1,2,1);
+        imagesc(Y_clean(:,:,1));
+        title('Clean Signal');
+        colorbar;
+        axis square;
+        
+        subplot(1,2,2);
+        imagesc(Y(:,:,1));
+        title(sprintf('Signal with Noise (SNR=%.1f)', SNR));
+        colorbar;
+        axis square;
+    end
     
     % Add noise to each kernel
     for b = 1:num_kernels

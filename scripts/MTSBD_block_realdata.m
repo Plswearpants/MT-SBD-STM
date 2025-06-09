@@ -255,22 +255,18 @@ end
 % SBD settings.
 miniloop_iteration = 1;
 outerloop_maxIT= 12;
-params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.1, 0.1,0.1, 0.03];  % regularization parameter for Phase I
+%params_ref.energy = energy_selected(params.ref_slice);
+params_ref.lambda1 = [0.03, 0.03,0.03, 0.05];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
-params_ref.phase2 = false;
-params_ref.kplus = ceil(0.5 * kernel_sizes);
-params_ref.lambda2 = [2e-2, 2e-2];  % FINAL reg. param. value for Phase II
-params_ref.nrefine = 3;
+params_ref.phase2 = true;
+params_ref.kplus = ceil(0.3 * kernel_sizes);
+params_ref.lambda2 = [0.08, 0.08, 0.08, 0.15];  % FINAL reg. param. value for Phase II
+params_ref.nrefine = 4;
 params_ref.signflip = 0.2;
 params_ref.xpos = true;
 params_ref.getbias = true;
 params_ref.Xsolve = 'FISTA';
 
-for k = 1:num_kernels
-    params_ref.xinit{k}.X = X0(:,:,k);
-    params_ref.xinit{k}.b = 0; 
-end
 % noise variance for computeResidualQuality.m
 params_ref.noise_var = eta_data;
 
