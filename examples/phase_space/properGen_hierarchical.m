@@ -19,14 +19,14 @@ sliceidx = str2num(input_str);
 num_kernels = length(sliceidx);
 
 % Fixed parameters
-fixed_params.p_scale = 4;                       % Resolution factor
+fixed_params.p_scale = 3;                       % Resolution factor
 fixed_params.N_single = N;                      % Input lattice size
 fixed_params.num_kernels = num_kernels;         % Number of kernels
 
 % Define parameter ranges for param_sets
-SNR_values = [10, 3.16, 1];                     % Different noise levels
-defect_density_values = logspace(-3, -2, 5);    % Different activation densities
-N_obs_values = [50, 100, 150, 200];           % Different observation lattice sizes
+SNR_values = [3, 1];                     % Different noise levels
+defect_density_values = logspace(-3, -2, 3);    % Different activation densities
+N_obs_values = [50, 75];           % Different observation lattice sizes
 
 % Create parameter set matrix
 [S, D, N] = meshgrid(SNR_values, defect_density_values, N_obs_values);
@@ -375,18 +375,150 @@ function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, rho_d, SN
     dataset.A0_noiseless = A0_noiseless;
     dataset.X0 = X0;
     
-    % Calculate kernel sizes
-    kernel_sizes = zeros(length(A0), 2);
+    % Calculate kernel sizes as 2×2 matrix where each row is [height, width] for one kernel
+    kernel_sizes = zeros(2, 2);  % Initialize [2×2] matrix
     for k = 1:length(A0)
-        kernel_sizes(k,:) = size(A0{k});
+        kernel_sizes(k,:) = size(A0{k});  % Store [height, width] for each kernel
     end
     
+    % Initialize A1 using most isolated points method
+    dataset.A1 = initialize_kernels_from_isolated_points(Y, X0, A0);
+    
     dataset.params = struct('defect_density', rho_d, ...
-                          'kernel_sizes', kernel_sizes, ...
+                          'kernel_size', kernel_sizes, ...  % [n×2] matrix of kernel sizes
                           'SNR', SNR, ...
                           'N_obs', N_obs, ...
                           'area_ratio', area_ratio);
     dataset.b0 = b0;
+end
+
+function A1 = initialize_kernels_from_isolated_points(Y, X0, A0)
+    % Initialize kernels by finding most isolated activation points
+    % Inputs:
+    %   Y: Observation data
+    %   X0: Ground truth activation maps (binary)
+    %   A0: Ground truth kernels (for size reference)
+    % Output:
+    %   A1: Cell array of initialized kernels with same sizes as A0
+    
+    num_kernels = size(X0, 3);
+    A1 = cell(1, num_kernels);
+    
+    % Get kernel sizes from A0
+    kernel_sizes = zeros(num_kernels, 2);
+    for k = 1:num_kernels
+        kernel_sizes(k,:) = size(A0{k});
+    end
+    
+    % Find most isolated points for each kernel
+    most_isolated_points = cell(1, num_kernels);
+    
+    for k = 1:num_kernels
+        % Get positions of defects (all activations are 1 in synthetic data)
+        [rows, cols] = find(X0(:,:,k));
+        defect_positions = [rows, cols];
+        
+        if isempty(defect_positions)
+            warning('No defects found for kernel %d', k);
+            A1{k} = zeros(kernel_sizes(k,:));  % Initialize with zeros of correct size
+            continue;
+        end
+        
+        % Create summed activation map of all other kernels
+        X_others = zeros(size(X0(:,:,1)));
+        for l = 1:num_kernels
+            if l ~= k
+                X_others = X_others + X0(:,:,l);
+            end
+        end
+        
+        % Get positions of defects in other kernels
+        [other_rows, other_cols] = find(X_others);
+        other_positions = [other_rows, other_cols];
+        
+        % Calculate isolation scores for all points
+        S_k = zeros(size(defect_positions, 1), 1);
+        for i = 1:size(defect_positions, 1)
+            diffs = other_positions - defect_positions(i,:);
+            distances = sum(diffs.^2, 2);
+            S_k(i) = min(distances);
+        end
+        
+        % Get exact kernel size from A0
+        [kernel_h, kernel_w] = size(A0{k});
+        half_h = floor(kernel_h/2);
+        half_w = floor(kernel_w/2);
+        
+        % Filter points that are away from boundaries
+        valid_points = true(size(defect_positions, 1), 1);
+        for i = 1:size(defect_positions, 1)
+            y = defect_positions(i,1);
+            x = defect_positions(i,2);
+            
+            if y <= half_h || y >= size(X0,1) - half_h || ...
+               x <= half_w || x >= size(X0,2) - half_w
+                valid_points(i) = false;
+            end
+        end
+        
+        % If we have valid points away from boundaries, use the one with highest score
+        if any(valid_points)
+            valid_defects = defect_positions(valid_points,:);
+            valid_scores = S_k(valid_points);
+            [~, max_idx] = max(valid_scores);
+            most_isolated_points{k} = valid_defects(max_idx,:);
+            
+            % Extract kernel directly since we know it's away from boundaries
+            y = most_isolated_points{k}(1);
+            x = most_isolated_points{k}(2);
+            A1{k} = Y(y-half_h:y+half_h, x-half_w:x+half_w);
+            
+            % Ensure exact size match with A0
+            if ~isequal(size(A1{k}), size(A0{k}))
+                A1{k} = imresize(A1{k}, size(A0{k}));
+            end
+        else
+            % Fallback: use the point with highest isolation score and pad
+            [~, max_idx] = max(S_k);
+            most_isolated_points{k} = defect_positions(max_idx,:);
+            
+            % Extract kernel with padding
+            y = most_isolated_points{k}(1);
+            x = most_isolated_points{k}(2);
+            
+            % Calculate valid ranges that stay within image boundaries
+            y_start = max(1, y - half_h);
+            y_end = min(size(Y,1), y + half_h);
+            x_start = max(1, x - half_w);
+            x_end = min(size(Y,2), x + half_w);
+            
+            % Extract the valid portion
+            kernel_patch = Y(y_start:y_end, x_start:x_end);
+            
+            % Create zero-padded kernel of required size
+            A1{k} = zeros(kernel_sizes(k,:));
+            
+            % Calculate offsets for centering the patch
+            y_offset = half_h - (y - y_start);
+            x_offset = half_w - (x - x_start);
+            
+            % Place the patch in the center of the zero-padded kernel
+            A1{k}(y_offset + (1:size(kernel_patch,1)), x_offset + (1:size(kernel_patch,2))) = kernel_patch;
+            
+            % Ensure exact size match with A0
+            if ~isequal(size(A1{k}), size(A0{k}))
+                A1{k} = imresize(A1{k}, size(A0{k}));
+            end
+        end
+        
+        % Normalize the kernel
+        A1{k} = proj2oblique(A1{k});
+        
+        % Final size check
+        assert(isequal(size(A1{k}), size(A0{k})), ...
+            'Kernel size mismatch: A1{%d} size %dx%d does not match A0{%d} size %dx%d', ...
+            k, size(A1{k},1), size(A1{k},2), k, size(A0{k},1), size(A0{k},2));
+    end
 end
 
 function regenerate_dataset()

@@ -1,4 +1,4 @@
-function A1 = initialize_kernels(Y, num_kernels, kernel_size, kerneltype, window_type)
+function A1 = initialize_kernels(Y, num_kernels, kernel_sizes, kerneltype, window_type)
     % Inputs:
     %   Y: input image
     %   num_kernels: number of kernels to initialize
@@ -22,7 +22,7 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_size, kerneltype, window
     switch lower(kerneltype)
         case 'random'
             for n = 1:num_kernels
-                A1{n} = proj2oblique(randn(kernel_size(n,:)));
+                A1{n} = proj2oblique(randn(kernel_sizes(n,:)));
                 % Apply window if specified
                 if ~isempty(window_type)
                     A1{n} = apply_window(A1{n}, window_type);
@@ -44,8 +44,8 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_size, kerneltype, window
                 % Initial position
                 init_x = 1;
                 init_y = 1;
-                rect_width = min(kernel_size(n,2), img_width);
-                rect_height = min(kernel_size(n,1), img_height);
+                rect_width = min(kernel_sizes(n,2), img_width);
+                rect_height = min(kernel_sizes(n,1), img_height);
                 
                 % Create rectangle
                 h_rect = imrect(gca, [init_x init_y rect_width rect_height]);
@@ -61,7 +61,7 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_size, kerneltype, window
                 addNewPositionCallback(h_rect, @(pos) updateCenterDot(pos, h_dot));
                 
                 % Set position constraints
-                setPositionConstraintFcn(h_rect, @(pos) constrainPosition(pos, img_width, img_height, kernel_size(n,:)));
+                setPositionConstraintFcn(h_rect, @(pos) constrainPosition(pos, img_width, img_height, kernel_sizes(n,:)));
                 
                 % Wait for user to finish positioning
                 position = wait(h_rect);
@@ -69,8 +69,8 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_size, kerneltype, window
                 % Extract the selected region
                 x1 = round(position(1));
                 y1 = round(position(2));
-                x2 = min(x1 + kernel_size(n,2) - 1, img_width);
-                y2 = min(y1 + kernel_size(n,1) - 1, img_height);
+                x2 = min(x1 + kernel_sizes(n,2) - 1, img_width);
+                y2 = min(y1 + kernel_sizes(n,1) - 1, img_height);
 
                 selected_kernel = Y(y1:y2, x1:x2);
 

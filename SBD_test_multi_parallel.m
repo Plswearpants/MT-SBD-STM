@@ -82,6 +82,22 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_parallel( Y, k, fixed_par
             getbias = false;
         end
         
+        % Extract Phase 2 parameters
+        if isfield(fixed_params, 'phase2')
+            phase2 = fixed_params.phase2;
+        else
+            phase2 = false;
+        end
+        
+        if phase2
+            if ~isfield(fixed_params, 'kplus') || ~isfield(fixed_params, 'lambda2') || ~isfield(fixed_params, 'nrefine')
+                error('Phase 2 requires kplus, lambda2, and nrefine parameters');
+            end
+            kplus = fixed_params.kplus;
+            lambda2 = fixed_params.lambda2;
+            nrefine = fixed_params.nrefine;
+        end
+        
         % Extract X0 and A0 for quality metrics
         if ~isfield(fixed_params, 'X0') || ~isfield(fixed_params, 'A0')
             error('params must contain X0 and A0 for quality metrics');
@@ -95,7 +111,6 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_parallel( Y, k, fixed_par
             param_idx, lambda1(1), round(mini_loop));
         fprintf('PHASE I: Initialization and First Iteration\n');
         
-
         % Add demixing factor
         faint_factor = 1;
 
@@ -113,6 +128,25 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_parallel( Y, k, fixed_par
         extras.parameters.mini_loop = mini_loop;
         extras.parameters.param_idx = param_idx;
         extras.parameters.dataset_idx = dataset_idx;
+
+        % Compute initial kernel order based on variance of initial guess
+        kernel_variances = zeros(1, kernel_num);
+        for n = 1:kernel_num
+            kernel_variances(n) = var(kernel_initialguess{n}(:));
+        end
+        [~, kernel_order] = sort(kernel_variances, 'descend');
+        
+        % Print the initial kernel processing order
+        fprintf('Initial kernel processing order: ');
+        fprintf('%d ', kernel_order);
+        fprintf('\n');
+        
+        % Print the initial variance of each kernel
+        fprintf('Initial kernel variances: ');
+        for n = 1:kernel_num
+            fprintf('%.6f ', kernel_variances(n));
+        end
+        fprintf('\n');
         
         % Main iteration loop
         for iter = 1:maxIT
@@ -127,10 +161,12 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_parallel( Y, k, fixed_par
             end
             Y_residual = Y - Y_sum;
             
-            % Update each kernel
-            for n = 1:kernel_num
+            % Update each kernel in the current order
+            for idx = 1:kernel_num
+                n = kernel_order(idx);
                 % Calculate Yiter for this kernel (changed to demixing approach)
                 Yiter = Y_residual + (iter > 1) * (1-1/(faint_factor*iter+1))*convfft2(A{n}, Xiter(:,:,n)) + (1/(faint_factor*iter+1))*Y_sum;
+                Y_residual_pre = Y_residual + convfft2(A{n}, Xiter(:,:,n));
                 
                 if iter == 1
                     % Initial X computation with parallel version
@@ -145,6 +181,7 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_parallel( Y, k, fixed_par
                 
                 Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
                 biter(n) = X_struct.(['x',num2str(n)]).b;
+                Y_residual = Y_residual_pre - convfft2(A{n},Xiter(:,:,n));
             end
             
             % Add input validation
@@ -187,41 +224,76 @@ function [ Aout, Xout, bout, extras ] = SBD_test_multi_parallel( Y, k, fixed_par
             % Initialize Phase II metrics
             extras.phase2.activation_metrics = zeros(nrefine + 1, kernel_num);
             extras.phase2.kernel_quality_factors = zeros(nrefine + 1, kernel_num);
+            extras.phase2.A = cell(1, kernel_num);
+            extras.phase2.X = cell(1, kernel_num);
+            extras.phase2.b = zeros(kernel_num, 1);
+            extras.phase2.info = cell(1, kernel_num);
             
             for i = 1:nrefine + 1
                 fprintf('lambda iteration %d/%d: \n', i, nrefine + 1);
                 
+                % Initialize Y_sum to zero before accumulation
+                Y_sum = zeros(size(Y));
                 % Standard Y_residual calculation (no demixing)
                 for m = 1:kernel_num
                     Y_sum = Y_sum + convfft2(A2{m}, X2_struct.(['x',num2str(m)]).X);
                 end
                 Y_residual = Y - Y_sum;
         
-                for n = 1:kernel_num
+                for idx = 1:kernel_num
+                    n = kernel_order(idx);
                     fprintf('Processing kernel %d, lambda = %.1e: \n', n, lambda(n));
                     % Calculate Yiter without demixing
                     Yiter = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
+                    Y_residual_pre = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
                     
                     % Use parallel version of Asolve
                     [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_parallel(Yiter, ...
                         A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, ...
                         getbias, config_dir);
                     
-                    % Attempt to "unshift" the a and x
+                    % Attempt to "unshift" the a and x with decay factors
                     score = zeros(2*kplus(n,1)+1, 2*kplus(n,2)+1);
+                    % Calculate center position
+                    center_y = kplus(n,1) + 1;
+                    center_x = kplus(n,2) + 1;
+                    
                     for tau1 = -kplus(n,1):kplus(n,1)
                         ind1 = tau1+kplus(n,1)+1;
                         for tau2 = -kplus(n,2):kplus(n,2)
                             ind2 = tau2+kplus(n,2)+1;
+                            
+                            % Get the selected region
                             temp = A2{n}(ind1:(ind1+k(n,1)-1), ind2:(ind2+k(n,2)-1));
-                            score(ind1,ind2) = norm(temp(:), 1);
+                            
+                            % Calculate decay for each point in temp relative to its center
+                            [y_coords, x_coords] = ndgrid(1:size(temp,1), 1:size(temp,2));
+                            center_y_temp = (size(temp,1)+1)/2;
+                            center_x_temp = (size(temp,2)+1)/2;
+                            
+                            % Calculate normalized distances from center (0 to 1)
+                            dist_y = abs(y_coords - center_y_temp) / center_y_temp;
+                            dist_x = abs(x_coords - center_x_temp) / center_x_temp;
+                            dist = sqrt(dist_y.^2 + dist_x.^2);
+                            
+                            % Calculate decay factor (1 at center, 0.5 at edges)
+                            decay = exp(-log(2) * dist);  % exp(-log(2)) = 0.5 at dist=1
+                            
+                            % Apply decay to temp and calculate score
+                            temp_decayed = temp .* decay;
+                            score(ind1,ind2) = norm(temp_decayed(:), 1);  % Use decayed version for scoring
                         end
                     end
                     [temp,ind1] = max(score); [~,ind2] = max(temp);
                     tau = [ind1(ind2) ind2]-kplus(n,:)-1;
+                    
+                    % Apply shift
                     A2{n} = circshift(A2{n},-tau);
                     X2_struct.(['x',num2str(n)]).X = circshift(X2_struct.(['x',num2str(n)]).X,tau);
                     X2_struct.(['x',num2str(n)]).W = circshift(X2_struct.(['x',num2str(n)]).W,tau);
+        
+                    % Update Y_residual after processing this kernel
+                    Y_residual = Y_residual_pre - convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
         
                     % Save phase 2 extras
                     extras.phase2.A{n} = A2{n};

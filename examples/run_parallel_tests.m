@@ -2,15 +2,15 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-load('results\parallel results\synthetic_datasets_20241127_170302/synthetic_datasets_20241127_170302.mat');  
+load('results\synthetic_datasets/synthetic_datasets_20250610_122349.mat');  
 %%
 % datasets = datasets(2);  % Choose subset if needed
 
 %% Initialize kernels for all datasets
-%A1_all = initialize_all_kernels(datasets);
+A1_all = initialize_all_kernels(datasets);
 
 %% Define system parameters and create configs
-lambda1_range = [0.05, 0.2, 0.4];
+lambda1_range = 0.2;
 mini_loop_range = [1, 3, 5];
 maxIT = 30;
 

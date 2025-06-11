@@ -238,102 +238,11 @@ function [ Aout, Xout, bout, extras ] = MTSBD_synthetic( Y, k, params, dispfun, 
                         
                         % Apply decay to temp
                         temp_decayed = temp .* decay;
-                        score(ind1,ind2) = norm(temp(:), 1);
+                        score(ind1,ind2) = norm(temp_decayed(:), 1);  % Use decayed version for scoring
                     end
                 end
                 [temp,ind1] = max(score); [~,ind2] = max(temp);
                 tau = [ind1(ind2) ind2]-kplus(n,:)-1;
-                
-                % Visualize the process for the first iteration of Phase II
-                if i == 1
-                    % First figure for kernel visualization
-                    figure('Position', [100, 100, 1500, 400]);
-                    
-                    % Plot original kernel
-                    subplot(1,5,1);
-                    imagesc(A{n});
-                    %title(sprintf('Original Kernel %d', n));
-                    colorbar;
-                    axis equal tight;
-                    
-                    % Initialize padded kernel centered
-                    k3 = k + 2*kplus;
-                    A2_padded = zeros(k3);
-                    % Place kernel at center
-                    center_y = kplus(n,1) + 1;
-                    center_x = kplus(n,2) + 1;
-                    A2_padded(center_y+(1:k(n,1)), center_x+(1:k(n,2))) = A{n};
-                    
-                    % Plot padded kernel
-                    subplot(1,5,2);
-                    imagesc(A2_padded);
-                    %title(sprintf('Padded Kernel %d', n));
-                    colorbar;
-                    axis equal tight;
-                    
-                    % Plot updated kernel before shifting
-                    subplot(1,5,3);
-                    imagesc(A2{n});
-                    %title(sprintf('Updated Kernel %d (Asolve)', n));
-                    colorbar;
-                    axis equal tight;
-                    
-                    % Plot score heatmap
-                    subplot(1,5,4);
-                    imagesc(score);
-                    %title(sprintf('Score Heatmap Kernel %d', n));
-                    colorbar;
-                    axis equal tight;
-                    hold on;
-                    plot(ind2, ind1(ind2), 'rx', 'MarkerSize', 10, 'LineWidth', 2);
-                    hold off;
-                    
-                    % Plot final truncated kernel
-                    A2_shifted = circshift(A2{n},-tau);
-                    A2_truncated = A2_shifted(kplus(n,1)+(1:k(n,1)), kplus(n,2)+(1:k(n,2)));
-                    subplot(1,5,5);
-                    imagesc(A2_truncated);
-                    %title(sprintf('Final Truncated Kernel %d', n));
-                    colorbar;
-                    axis equal tight;
-                    
-                    % Add overall title
-                    %sgtitle(sprintf('Kernel %d Shifting Process (Phase II, Iteration 1)', n));
-                    
-                    % Second figure for activation map visualization
-                    figure('Position', [100, 550, 1500, 400]);
-                    
-                    % Plot original activation map
-                    subplot(1,4,1);
-                    imagesc(X2_struct.(['x',num2str(n)]).X);
-                    title(sprintf('Original Activation Map %d', n));
-                    colorbar;
-                    axis equal tight;
-                    
-                    % Plot activation map after shifting
-                    X_shifted = circshift(X2_struct.(['x',num2str(n)]).X, tau);
-                    subplot(1,4,2);
-                    imagesc(X_shifted);
-                    title(sprintf('Shifted Activation Map %d', n));
-                    colorbar;
-                    axis equal tight;
-                    
-                    % Plot Y_residual before and after
-                    subplot(1,4,3);
-                    imagesc(Y_residual_pre);
-                    title(sprintf('Y Residual Before Shift %d', n));
-                    colorbar;
-                    axis equal tight;
-                    
-                    subplot(1,4,4);
-                    imagesc(Y_residual);
-                    title(sprintf('Y Residual After Shift %d', n));
-                    colorbar;
-                    axis equal tight;
-                    
-                    % Add overall title
-                    sgtitle(sprintf('Activation Map and Residual Shifting Process (Phase II, Iteration 1)'));
-                end
                 
                 % Apply shift
                 A2{n} = circshift(A2{n},-tau);

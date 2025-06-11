@@ -29,11 +29,11 @@ for i = 1:num_datasets
     
     % Get dataset parameters
     Y = datasets(i).Y;
-    kernel_size = datasets(i).params.kernel_size;
-    num_kernels = size(kernel_size, 1);
+    kernel_sizes = datasets(i).params.kernel_sizes;
+    num_kernels = size(kernel_sizes, 1);
     
     % Initialize kernels
-    A1_all{i} = initialize_kernels(Y, num_kernels, kernel_size, kerneltype, window_type);
+    A1_all{i} = initialize_kernels(Y, num_kernels, kernel_sizes, kerneltype, window_type);
     
     fprintf('Done\n');
 end
