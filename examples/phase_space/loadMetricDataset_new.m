@@ -18,29 +18,29 @@ function dataset_metrics = loadMetricDataset_new()
     % Load parameter information
     try
         synthetic_data = load(fullfile(folder_path, synthetic_files(1).name), 'datasets', 'param_sets', 'descriptions');
-        param_sets = synthetic_data.param_sets;  % [theta, Area_ratio, SNR]
+        param_sets = synthetic_data.param_sets;  % [SNR, theta_cap, Nobs]
     catch ME
         error('Failed to load synthetic dataset file: %s', ME.message);
     end
 
     % Create parameter mapping (hash table approach)
-    [unique_theta, ~, theta_idx] = unique(param_sets(:,1));
-    [unique_area, ~, area_idx] = unique(param_sets(:,2));
-    [unique_snr, ~, snr_idx] = unique(param_sets(:,3));
+    [unique_snr, ~, snr_idx] = unique(param_sets(:,1));
+    [unique_theta, ~, theta_idx] = unique(param_sets(:,2));
+    [unique_nobs, ~, nobs_idx] = unique(param_sets(:,3));
     
     % Store parameter values
-    dataset_metrics.theta_cap_values = unique_theta;
-    dataset_metrics.area_ratio_values = unique_area;
     dataset_metrics.SNR_values = unique_snr;
+    dataset_metrics.theta_cap_values = unique_theta;
+    dataset_metrics.Nobs_values = unique_nobs;
     
     % Create parameter lookup table
     param_lookup = zeros(size(param_sets, 1), 3);
     for i = 1:size(param_sets, 1)
-        param_lookup(i,:) = [theta_idx(i), area_idx(i), snr_idx(i)];
+        param_lookup(i,:) = [snr_idx(i), theta_idx(i), nobs_idx(i)];
     end
     
     % Initialize metric arrays with pre-allocated memory
-    dims = [length(unique_theta), length(unique_area), length(unique_snr)];
+    dims = [length(unique_snr), length(unique_theta), length(unique_nobs)];
     dataset_metrics.kernel_quality_trajectory = cell(dims);
     dataset_metrics.activation_similarity_trajectory = cell(dims);
     dataset_metrics.kernel_quality_final = nan(dims);
@@ -180,12 +180,12 @@ end
 
 function print_metrics_summary(metrics)
     fprintf('\nDataset Parameters Summary:\n');
-    fprintf('- Theta cap: %d values [%.2e to %.2e]\n', ...
-        length(metrics.theta_cap_values), min(metrics.theta_cap_values), max(metrics.theta_cap_values));
-    fprintf('- Area ratio: %d values [%.2f to %.2f]\n', ...
-        length(metrics.area_ratio_values), min(metrics.area_ratio_values), max(metrics.area_ratio_values));
     fprintf('- SNR: %d values [%.2e to %.2e]\n', ...
         length(metrics.SNR_values), min(metrics.SNR_values), max(metrics.SNR_values));
+    fprintf('- Theta cap: %d values [%.2e to %.2e]\n', ...
+        length(metrics.theta_cap_values), min(metrics.theta_cap_values), max(metrics.theta_cap_values));
+    fprintf('- Nobs: %d values [%.2f to %.2f]\n', ...
+        length(metrics.Nobs_values), min(metrics.Nobs_values), max(metrics.Nobs_values));
     
     % Add summary of stored reconstruction data
     fprintf('\nReconstruction Data Summary:\n');

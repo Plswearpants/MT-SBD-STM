@@ -2,7 +2,7 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-load('results\synthetic_datasets\synthetic_datasets_20250610_140145.mat');  
+load('results\synthetic_datasets\synthetic_datasets_20250611_182057.mat');  
 
 %% Visualize pre-initialized kernels for random datasets
 fprintf('Displaying pre-initialized kernels for 4 random datasets...\n');
@@ -77,8 +77,8 @@ for n = 1:num_datasets
     
     % Add Phase 2 parameters
     params_all{n}.kplus = ceil(0.3 * datasets(n).params.kernel_size);  % Border padding for sphere lifting
-    params_all{n}.lambda2 = params_all{n}.lambda1 * 0.2;  % FINAL reg. param. value for Phase II 
-    params_all{n}.nrefine = 10;  % Number of refinements for Phase II
+    params_all{n}.lambda2 = params_all{n}.lambda1 * 0.5;  % FINAL reg. param. value for Phase II 
+    params_all{n}.nrefine = 8;  % Number of refinements for Phase II
 end
 
 % Parallel loop over datasets
