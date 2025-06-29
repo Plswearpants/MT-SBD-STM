@@ -1,19 +1,19 @@
 %% Block 1: Generate Test Data and Initialize Kernels
 % Generate test set
-SNR = 5;              % Signal-to-noise ratio
-N_obs = 30;           % Observation lattice size 
+SNR = 3;              % Signal-to-noise ratio
+N_obs = 100;           % Observation lattice size 
 observation_resolution = 3;  % Resolution: 3 pixels per lattice site
-defect_density = 0.006;    
-num_slices = 2;
+defect_density = 0.0005;    
+num_slices = 5;
 
 % Generate data with custom parameters
-[Y, A0, X0, params] = properGen_full(SNR, N_obs, observation_resolution, defect_density, ...
+[Y, A0_noiseless, X0, params] = properGen_full(SNR, N_obs, observation_resolution, defect_density, ...
     'LDoS_path', 'example_data/LDoS_single_defects_self=0.6_save.mat', ...
     'num_slices', num_slices, ...
-    'vis', 1);
+    'vis', 0);
 
 % Extract parameters from generated data
-A0_noiseless = params.A0_noiseless;
+A0 = params.A0;
 num_kernels = params.num_kernels;
 num_slices = params.num_slices; 
 
@@ -91,13 +91,13 @@ end
 params.use_Xregulated = false;  % Set to true to use MTSBD_Xregulated, false for SBD_test_multi_demixing
 
 % SBD settings
-initial_iteration = 3;
-maxIT = 4;
-params.phase2 = true;  % Enable Phase 2
+initial_iteration = 1;
+maxIT = 15;
+params.phase2 = false;  % whether Enable Phase 2
 params.lambda1 = [3e-2, 3e-2, 3e-2, 3e-2];  % regularization parameter for Phase I
 params.kplus = ceil(0.5 * kernel_sizes_ref);
 params.lambda2 = [1e-2, 1e-2, 1e-2, 1e-2];  % FINAL reg. param. value for Phase II
-params.nrefine = 3;  % Number of refinements for Phase II
+params.nrefine = 5;  % Number of refinements for Phase II
 params.signflip = 0.2;
 params.xpos = true;
 params.getbias = true;
@@ -134,7 +134,7 @@ end
 fprintf('Calculating isolation scores and finding most isolated points...\n');
 
 % Choose target kernel sizes first
-type = 'kernel_sizes_cap';
+type = 'kernel_sizes_all';
 if strcmp(type, 'ref_kernel_sizes')
     target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
 elseif strcmp(type, 'kernel_sizes_cap')

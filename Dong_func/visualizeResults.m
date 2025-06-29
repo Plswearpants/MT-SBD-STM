@@ -1,4 +1,4 @@
-function visualizeResults(Y, A0, Aout, X0, Xout, bout, extras, indices)
+function Y_reconstructed = visualizeResults(Y, A0, Aout, X0, Xout, bout, extras, indices)
     % Visualize results from SBD-STM reconstruction
     %
     % Inputs:
@@ -59,7 +59,7 @@ function visualizeResults(Y, A0, Aout, X0, Xout, bout, extras, indices)
     Y_reconstructed = zeros(size(Y));
     for i = 1:num_kernels
         Y_reconstructed = Y_reconstructed + convfft2(Aout{i}, aligned_maps.Xout_aligned(:,:,i));
-        %Y_reconstructed = Y_reconstructed + bout(i);  % Add bias term
+        Y_reconstructed = Y_reconstructed + bout(i);  % Add bias term
     end
 
     % 1. Original vs Reconstructed Full Image

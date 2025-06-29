@@ -55,6 +55,7 @@ function dataset_metrics = loadMetricDataset_new()
     dataset_metrics.Y = cell(dims);          % Original observations from synthetic data
     dataset_metrics.Y_clean = cell(dims);    % Clean observations from synthetic data
     dataset_metrics.A0 = cell(dims);         % Ground truth kernels
+    dataset_metrics.A0_noiseless = cell(dims); % noiseless ground truth kernels 
     dataset_metrics.X0 = cell(dims);         % Ground truth activations
     dataset_metrics.Aout = cell(dims);       % Reconstructed kernels
     dataset_metrics.Xout = cell(dims);       % Reconstructed activations
@@ -92,7 +93,7 @@ function dataset_metrics = loadMetricDataset_new()
                 % Store original and clean observations
                 dataset_metrics.Y{indices(1), indices(2), indices(3)} = synthetic_data.datasets(dataset_num).Y;
                 dataset_metrics.Y_clean{indices(1), indices(2), indices(3)} = synthetic_data.datasets(dataset_num).Y_clean;
-                
+                dataset_metrics.A0_noiseless{indices(1), indices(2), indices(3)} = synthetic_data.datasets(dataset_num).A0_noiseless;
                 % Store ground truth data
                 if isfield(data, 'dataset_A0')
                     dataset_metrics.A0{indices(1), indices(2), indices(3)} = data.dataset_A0{1};
@@ -120,10 +121,10 @@ function dataset_metrics = loadMetricDataset_new()
                     [~, quality_scores] = detect_kernel_flip(data.dataset_X0, data.Xout, data.dataset_A0, data.Aout, true);
                     
                     % Store metrics from original order
-                    kernel_quality_final = quality_scores.no_flip.kernel_similarity;
+                    kernel_quality_final = mean(quality_scores.no_flip.kernel_similarity);
                     dataset_metrics.kernel_quality_final(indices(1), indices(2), indices(3)) = kernel_quality_final;
 
-                    act_sim_final = quality_scores.no_flip.activation_similarity;
+                    act_sim_final = mean(quality_scores.no_flip.activation_similarity);
                     dataset_metrics.activation_similarity_final(indices(1), indices(2), indices(3)) = act_sim_final;
 
                     % Calculate demixing score

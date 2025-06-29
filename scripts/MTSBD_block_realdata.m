@@ -64,7 +64,7 @@ switch method
         [data_masked, ~] = defect_masking(data_carried, index);
     case 'tg'
         % Apply flat disk mask with Gaussian smoothing
-        [~, defect_loc] = gaussianMaskDefects(Y,index, num_defect_type);
+        [data_masked, defect_loc] = gaussianMaskDefects(Y,index, num_defect_type);
     case 'threshold'
         % Apply threshold-based defect masking
         [data_masked, defect_mask] = thresholdDefects(data_carried, index);
@@ -219,8 +219,8 @@ window_type = {'gaussian', 2.5};
 
 
 if same_size
-    [square_size] = squareDrawSize(Y_ref);
-    %square_size=[65,65];
+    %[square_size] = squareDrawSize(Y_ref);
+    square_size=[80,80];
     kernel_sizes = repmat(square_size,[num_kernels,1]);
     A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
 else
@@ -254,13 +254,13 @@ end
 
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 12;
+outerloop_maxIT= 7;
 %params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.03, 0.03,0.03, 0.05];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.03, 0.03,0.02, 0.05];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
-params_ref.phase2 = true;
-params_ref.kplus = ceil(0.3 * kernel_sizes);
-params_ref.lambda2 = [0.08, 0.08, 0.08, 0.15];  % FINAL reg. param. value for Phase II
+params_ref.phase2 = false;
+params_ref.kplus = ceil(0.2 * kernel_sizes);
+params_ref.lambda2 = [0.05, 0.05, 0.05, 0.15];  % FINAL reg. param. value for Phase II
 params_ref.nrefine = 4;
 params_ref.signflip = 0.2;
 params_ref.xpos = true;
@@ -286,9 +286,9 @@ end
 [X_ref_aligned, ~, ~] = alignActivationMaps(X0, X_ref, kernel_sizes);
 [X_similarity, ~] = computeActivationSimilarity(X0, X_ref_aligned, kernel_sizes,1);
 %% Pad the A_ref to be size defined by user, normalize and use them as the A1
-%target_size = [110, 110];
-%kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
-kernel_sizes_pad = [[120,120];[120,120];[65,65]];
+target_size = [100, 100];
+kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
+%kernel_sizes_pad = [[120,120];[120,120];[65,65]];
 A_pre_pad = A_ref;
 A1_ref = cell(1, num_kernels);
 for k = 1:num_kernels
@@ -334,7 +334,7 @@ end
 miniloop_iteration = 1;
 outerloop_maxIT= 5;
 
-params_ref.lambda1 = [0.2, 0.2,0.2,0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.03, 0.03, 0.03,0.03];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.5 * kernel_sizes);

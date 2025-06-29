@@ -2,15 +2,15 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-load('results\synthetic_datasets\synthetic_datasets_20250120_173448.mat');  
+load('results\synthetic_datasets\synthetic_datasets_20250628_220033.mat');  
 
 %% Initialize kernels for all datasets
 fprintf('Initializing kernels for %d datasets...\n', length(datasets));
 % Choose initialization method ('activation' or 'random')
-init_method = 'random';
-
-if strcmp(init_method, 'activation')
-    A1_all = initialize_kernels_from_activations(datasets);
+init_method = 'activation';
+sigma_gaussian = 5.0;
+if strcmp(init_method, 'activation')    
+    A1_all = initialize_kernels_from_activations(datasets, sigma_gaussian);
 else
     A1_all = initialize_kernels_random(datasets);
 end
@@ -48,7 +48,7 @@ drawnow;
 %% Define optimal parameters (no longer need parameter loops)
 lambda1_optimal = 0.2;  % example value
 mini_loop_optimal = 3;  % example value
-maxIT = 30;
+maxIT = 20;
 
 % Create single parameter combination
 param_combinations = [lambda1_optimal, mini_loop_optimal];
@@ -81,7 +81,7 @@ update_config(fullfile(param_dir, 'Asolve_config_tunable.mat'), ...
 
 %% Initialize parallel pool
 if isempty(gcp('nocreate'))
-    parpool(9);  % Creates pool with 9 workers
+    parpool(10);  % Creates pool with 9 workers
 end
 
 %% Run parallel processing on datasets
@@ -139,7 +139,7 @@ rmdir(config_dir, 's');
 fprintf('Processing complete!\n');
 
 %% Helper Functions
-function A1_all = initialize_kernels_from_activations(datasets)
+function A1_all = initialize_kernels_from_activations(datasets, sigma_gaussian)
     % Initialize kernels using activation point closest to center for each dataset
     % Input:
     %   datasets: 1×N struct array with fields Y, X0, params
@@ -186,35 +186,51 @@ function A1_all = initialize_kernels_from_activations(datasets)
                 row_end = row + half_height;
                 col_start = col - half_width;
                 col_end = col + half_width;
+
+                % print row_start, row_end, col_start, col_end
+                fprintf('row_start: %d, row_end: %d, col_start: %d, col_end: %d\n', row_start, row_end, col_start, col_end);
                 
-                % Adjust window to fit within image bounds
-                if row_start < 1
-                    shift = 1 - row_start;
-                    row_start = 1;
-                    row_end = row_end + shift;
-                elseif row_end > size(Y,1)
-                    shift = row_end - size(Y,1);
-                    row_end = size(Y,1);
-                    row_start = row_start - shift;
+                % Get image dimensions
+                [img_height, img_width] = size(Y);
+                
+                % Initialize kernel with zeros
+                A1{k} = zeros(kernel_height, kernel_width);
+                
+                % Calculate valid ranges for extraction from Y
+                y_row_start = max(1, row_start);
+                y_row_end = min(img_height, row_end);
+                y_col_start = max(1, col_start);
+                y_col_end = min(img_width, col_end);
+                
+                % Calculate corresponding positions in the kernel
+                k_row_start = y_row_start - row_start + 1;
+                k_row_end = k_row_start + (y_row_end - y_row_start);
+                k_col_start = y_col_start - col_start + 1;
+                k_col_end = k_col_start + (y_col_end - y_col_start);
+                
+                % Extract valid portion from Y and place in kernel
+                if y_row_start <= y_row_end && y_col_start <= y_col_end
+                    A1{k}(k_row_start:k_row_end, k_col_start:k_col_end) = ...
+                        Y(y_row_start:y_row_end, y_col_start:y_col_end);
                 end
                 
-                if col_start < 1
-                    shift = 1 - col_start;
-                    col_start = 1;
-                    col_end = col_end + shift;
-                elseif col_end > size(Y,2)
-                    shift = col_end - size(Y,2);
-                    col_end = size(Y,2);
-                    col_start = col_start - shift;
-                end
-                
-                % Extract and normalize initial kernel
-                A1{k} = Y(row_start:row_end, col_start:col_end);
+                fprintf('Extracted from Y[%d:%d, %d:%d] -> Kernel[%d:%d, %d:%d]\n', ...
+                    y_row_start, y_row_end, y_col_start, y_col_end, ...
+                    k_row_start, k_row_end, k_col_start, k_col_end);
                 
                 % Resize to match exact kernel size if needed
                 if size(A1{k},1) ~= kernel_height || size(A1{k},2) ~= kernel_width
                     A1{k} = imresize(A1{k}, [kernel_height, kernel_width]);
                 end
+                
+                % Apply Gaussian window with sigma = 2.5
+                [h, w] = size(A1{k});
+                [X_grid, Y_grid] = meshgrid(1:w, 1:h);
+                center_x = (w + 1) / 2;
+                center_y = (h + 1) / 2;
+                sigma = sigma_gaussian;
+                gaussian_mask = exp(-((X_grid - center_x).^2 + (Y_grid - center_y).^2) / (2 * sigma^2));
+                A1{k} = A1{k} .* gaussian_mask;
                 
                 A1{k} = proj2oblique(A1{k});  % Normalize
                 
@@ -224,14 +240,53 @@ function A1_all = initialize_kernels_from_activations(datasets)
                     size(A1{k},1), size(A1{k},2), kernel_height, kernel_width);
             else
                 warning('No activation found for kernel %d in dataset %d', k, i);
-                % Fallback: use center of image
-                A1{k} = Y(center(1)-half_height:center(1)+half_height, ...
-                         center(2)-half_width:center(2)+half_width);
+                % Fallback: use center of image with boundary checking
+                [img_height, img_width] = size(Y);
+                
+                % Calculate initial window bounds from center
+                row_start = center(1) - half_height;
+                row_end = center(1) + half_height;
+                col_start = center(2) - half_width;
+                col_end = center(2) + half_width;
+                
+                % Initialize kernel with zeros
+                A1{k} = zeros(kernel_height, kernel_width);
+                
+                % Calculate valid ranges for extraction from Y
+                y_row_start = max(1, row_start);
+                y_row_end = min(img_height, row_end);
+                y_col_start = max(1, col_start);
+                y_col_end = min(img_width, col_end);
+                
+                % Calculate corresponding positions in the kernel
+                k_row_start = y_row_start - row_start + 1;
+                k_row_end = k_row_start + (y_row_end - y_row_start);
+                k_col_start = y_col_start - col_start + 1;
+                k_col_end = k_col_start + (y_col_end - y_col_start);
+                
+                % Extract valid portion from Y and place in kernel
+                if y_row_start <= y_row_end && y_col_start <= y_col_end
+                    A1{k}(k_row_start:k_row_end, k_col_start:k_col_end) = ...
+                        Y(y_row_start:y_row_end, y_col_start:y_col_end);
+                end
+                
+                fprintf('Fallback: Extracted from Y[%d:%d, %d:%d] -> Kernel[%d:%d, %d:%d]\n', ...
+                    y_row_start, y_row_end, y_col_start, y_col_end, ...
+                    k_row_start, k_row_end, k_col_start, k_col_end);
                 
                 % Resize to match exact kernel size if needed
                 if size(A1{k},1) ~= kernel_height || size(A1{k},2) ~= kernel_width
                     A1{k} = imresize(A1{k}, [kernel_height, kernel_width]);
                 end
+                
+                % Apply Gaussian window with sigma = 2.5
+                [h, w] = size(A1{k});
+                [X_grid, Y_grid] = meshgrid(1:w, 1:h);
+                center_x = (w + 1) / 2;
+                center_y = (h + 1) / 2;
+                sigma = sigma_gaussian;
+                gaussian_mask = exp(-((X_grid - center_x).^2 + (Y_grid - center_y).^2) / (2 * sigma^2));
+                A1{k} = A1{k} .* gaussian_mask;
                 
                 A1{k} = proj2oblique(A1{k});
             end

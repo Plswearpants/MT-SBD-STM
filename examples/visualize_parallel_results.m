@@ -7,7 +7,6 @@ plot_performance_heatmaps(metrics);
 %% Create parameter slices  
 plot_parameter_slices(metrics);
 
-
 %% Single dataset visualization
 visualize_single_dataset();
 

@@ -313,9 +313,29 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
         end
     end
     
-    % Add noise based on SNR
-    eta = var(Y_clean(:)) / SNR;
-    Y = Y_clean + sqrt(eta) * randn(size(Y_clean));
+    % Add noise based on SNR - layer-wise (slice-wise)
+    Y = zeros(size(Y_clean));
+    eta_slices = zeros(1, num_slices);
+    eta_norm = zeros(1, num_slices);
+    
+    for s = 1:num_slices
+        % Calculate mean variance of kernels for this slice
+        kernel_variances = zeros(1, num_kernels);
+        for b = 1:num_kernels
+            kernel_variances(b) = var(A0_noiseless{s,b}, [], 'all');
+        end
+        mean_kernel_variance = mean(kernel_variances);
+        
+        % Calculate noise variance based on kernel variance
+        eta_slices(s) = mean_kernel_variance / SNR;
+        
+        % Add noise to this slice
+        Y(:,:,s) = (Y_clean(:,:,s) + sqrt(eta_slices(s)) * randn(size(Y_clean(:,:,s))));
+        Y_slice_norm = norm(Y(:,:,s),'fro');
+        std_norm(s) = sqrt(eta_slices(s))/ Y_slice_norm;
+    end
+    
+    Y = proj2oblique(Y);
     
     % Visualize noise addition if requested
     if vis
@@ -336,7 +356,7 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
     % Add noise to each kernel
     for b = 1:num_kernels
         for s = 1:num_slices
-            A0{s,b} = A0_noiseless{s,b} + sqrt(eta) * randn(size(A0_noiseless{s,b}));
+            A0{s,b} = proj2oblique(A0_noiseless{s,b} + sqrt(eta_slices(s)) * randn(size(A0_noiseless{s,b})));
         end
     end
 
@@ -352,31 +372,10 @@ function [Y, A0_noiseless, X0, params] = properGen_full(varargin)
     params.selected_indices = selected_indices;
     params.cutoff_M = cutoff_M;
     params.kernel_sizes = kernel_sizes;
-    params.A0_noiseless = A0_noiseless;
+    params.A0 = A0;
     params.X0 = X0;
-    params.eta = eta;
-
-    % Display summary of processing
-    figure('Name', 'Processing Summary');
-    for k = 1:min(6, num_kernels)  % Show up to 6 kernels
-        subplot(3, 2, k)
-        imagesc(squeeze(X0(k,:,:)));
-        title(sprintf('Activation Map %d', k));
-        axis square;
-        colorbar;
-    end
-    sgtitle('Activation Maps for Selected Kernels');
-
-    % Display final observation
-    figure('Name', 'Final Observation');
-    for s = 1:min(6, num_slices)  % Show up to 6 slices
-        subplot(2, 3, s)
-        imagesc(Y(:,:,s));
-        title(sprintf('Slice %d', s));
-        axis square;
-        colorbar;
-    end
-    sgtitle(sprintf('Final Observation (SNR=%.1f)', SNR));
+    params.eta_slices = eta_slices;
+    params.std_norm = std_norm;
 
     % Display 3D view
     figure('Name', '3D Observation');

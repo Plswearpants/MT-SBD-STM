@@ -25,14 +25,14 @@ function visualize_heatspace_details_properGen(dataset_metrics)
     fprintf('Nobs: %.0f\n', dataset_metrics.Nobs_values(nobs_idx));
     
     % Extract data for the selected point
-    Y = dataset_metrics.Y{theta_idx, snr_idx, nobs_idx};
-    Y_clean = dataset_metrics.Y_clean{theta_idx, snr_idx, nobs_idx};
-    A0 = dataset_metrics.A0{theta_idx, snr_idx, nobs_idx};
-    X0 = dataset_metrics.X0{theta_idx, snr_idx, nobs_idx};
-    Aout = dataset_metrics.Aout{theta_idx, snr_idx, nobs_idx};
-    Xout = dataset_metrics.Xout{theta_idx, snr_idx, nobs_idx};
-    bout = dataset_metrics.bout{theta_idx, snr_idx, nobs_idx};
-    extras = dataset_metrics.extras{theta_idx, snr_idx, nobs_idx};
+    Y = dataset_metrics.Y{snr_idx, theta_idx, nobs_idx};
+    Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, nobs_idx};
+    A0 = dataset_metrics.A0{snr_idx, theta_idx, nobs_idx};
+    X0 = dataset_metrics.X0{snr_idx, theta_idx, nobs_idx};
+    Aout = dataset_metrics.Aout{snr_idx, theta_idx, nobs_idx};
+    Xout = dataset_metrics.Xout{snr_idx, theta_idx, nobs_idx};
+    bout = dataset_metrics.bout{snr_idx, theta_idx, nobs_idx};
+    extras = dataset_metrics.extras{snr_idx, theta_idx, nobs_idx};
     
     % Check if data exists for this point
     if isempty(Aout) || isempty(Xout)
@@ -51,11 +51,11 @@ function visualize_heatspace_details_properGen(dataset_metrics)
     % Print performance metrics
     fprintf('\nPerformance Metrics:\n');
     fprintf('Kernel Quality Score: %.3f\n', ...
-        dataset_metrics.kernel_quality_final(theta_idx, snr_idx, nobs_idx));
+        dataset_metrics.kernel_quality_final(snr_idx, theta_idx, nobs_idx));
     fprintf('Activation Similarity Score: %.3f\n', ...
-        dataset_metrics.activation_similarity_final(theta_idx, snr_idx, nobs_idx));
+        dataset_metrics.activation_similarity_final(snr_idx, theta_idx, nobs_idx));
     fprintf('Combined Activation Score: %.3f\n', ...
-        dataset_metrics.combined_activationScore(theta_idx, snr_idx, nobs_idx));
+        dataset_metrics.combined_activationScore(snr_idx, theta_idx, nobs_idx));
     fprintf('Demixing Score: %.4f\n', demix_score);
     
     % Print convergence information if available

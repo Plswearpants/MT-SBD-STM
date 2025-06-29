@@ -2,7 +2,7 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-load('results\synthetic_datasets\synthetic_datasets_20250611_182057.mat');  
+load('results\synthetic_datasets\synthetic_datasets_20250628_220033.mat');  
 
 %% Visualize pre-initialized kernels for random datasets
 fprintf('Displaying pre-initialized kernels for 4 random datasets...\n');

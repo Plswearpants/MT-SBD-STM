@@ -31,12 +31,12 @@ function [is_flipped, quality_scores, Xout, Aout] = detect_kernel_flip(X0, Xout,
     end
 
     % Case 1: No flip - original order
-    Q_noflip = computeQualityMetrics(X0, Xout, A0, Aout, kernel_size);
+    [activation_similarity, kernel_similarity] = computeQualityMetrics(X0, Xout, A0, Aout, kernel_size);
     
     % Store quality scores
     quality_scores = struct();
-    quality_scores.no_flip = struct('activation_similarity', Q_noflip(1), ...
-                                  'kernel_similarity', Q_noflip(2));
+    quality_scores.no_flip = struct('activation_similarity', activation_similarity, ...
+                                  'kernel_similarity', kernel_similarity);
     
     if skip_flip_check
         is_flipped = false;
@@ -45,14 +45,14 @@ function [is_flipped, quality_scores, Xout, Aout] = detect_kernel_flip(X0, Xout,
         Xout_flip = cat(3, Xout(:,:,2), Xout(:,:,1));
         Aout_flip = {Aout{2}, Aout{1}};  % Swap kernels
         
-        Q_flipped = computeQualityMetrics(X0, Xout_flip, A0, Aout_flip, kernel_size);
+        [activation_similarity_flipped, kernel_similarity_flipped] = computeQualityMetrics(X0, Xout_flip, A0, Aout_flip, kernel_size);
         
         % Add flipped quality scores
-        quality_scores.flipped = struct('activation_similarity', Q_flipped(1), ...
-                                      'kernel_similarity', Q_flipped(2));
+        quality_scores.flipped = struct('activation_similarity', activation_similarity_flipped, ...
+                                      'kernel_similarity', kernel_similarity_flipped);
 
         % Determine if kernels should be flipped - flipped if all entries in quality are greater in flipped case
-        is_flipped = all(Q_flipped > Q_noflip) && all(Q_flipped > 0.8);
+        is_flipped = all(activation_similarity_flipped > activation_similarity) && all(kernel_similarity_flipped > kernel_similarity) && all(activation_similarity_flipped > 0.8) && all(kernel_similarity_flipped > 0.8);
         
         % Only print information if kernels are flipped
         if is_flipped

@@ -24,8 +24,8 @@ fixed_params.N_single = N;                      % Input lattice size
 fixed_params.num_kernels = num_kernels;         % Number of kernels
 
 % Define parameter ranges for param_sets
-SNR_values = [5, 3, 1];                     % Different noise levels
-defect_density_values = logspace(-3, -2, 5);    % Different activation densities
+SNR_values = [3, 2, 1];                     % Different noise levels
+defect_density_values = logspace(-3, -1.5, 5);    % Different activation densities
 N_obs_values = [50, 100, 150, 200];           % Different observation lattice sizes
 
 % Create parameter set matrix
@@ -306,21 +306,23 @@ function [Y, A0] = add_noise_to_dataset(Y_clean, A0_noiseless, SNR)
     % Initialize noisy kernels
     A0 = cell(size(A0_noiseless));
     
-    % Add noise to kernels
-    avg_var = 0;
+    % Calculate mean variance of kernels for noise level determination
+    kernel_variances = zeros(1, length(A0_noiseless));
     for k = 1:length(A0_noiseless)
-        avg_var = avg_var + var(A0_noiseless{k}, 0, "all");
+        kernel_variances(k) = var(A0_noiseless{k}, [], 'all');
     end
-    avg_var = avg_var / length(A0_noiseless);
+    mean_kernel_variance = mean(kernel_variances);
     
-    eta_kernel = avg_var/SNR;
+    % Calculate noise variance based on kernel variance
+    eta = mean_kernel_variance / SNR;
+    
+    % Add noise to kernels
     for k = 1:length(A0_noiseless)
-        A0{k} = A0_noiseless{k} + sqrt(eta_kernel)*randn(size(A0_noiseless{k}));
+        A0{k} = A0_noiseless{k} + sqrt(eta) * randn(size(A0_noiseless{k}));
         A0{k} = proj2oblique(A0{k});
     end
     
-    % Add noise to observation
-    eta = var(Y_clean, 0, "all") / SNR;
+    % Add noise to observation using the same eta based on kernel variance
     Y = Y_clean + sqrt(eta) * randn(size(Y_clean));
 end
 
