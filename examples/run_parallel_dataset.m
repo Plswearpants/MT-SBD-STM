@@ -2,7 +2,7 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-load('results\synthetic_datasets\synthetic_datasets_20250628_220033.mat');  
+load('results\synthetic_datasets\synthetic_datasets_20250629_163445.mat');  
 
 %% Initialize kernels for all datasets
 fprintf('Initializing kernels for %d datasets...\n', length(datasets));
@@ -48,7 +48,7 @@ drawnow;
 %% Define optimal parameters (no longer need parameter loops)
 lambda1_optimal = 0.2;  % example value
 mini_loop_optimal = 3;  % example value
-maxIT = 20;
+maxIT = 15;
 
 % Create single parameter combination
 param_combinations = [lambda1_optimal, mini_loop_optimal];

@@ -30,20 +30,44 @@ end
 
 function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric_values, title_str)
     % Create meshgrid matching the data structure: Metric(SNR, theta_cap, Nobs)
+    % The data structure is [SNR, theta_cap, Nobs], so meshgrid should match this
     [SNR, Theta, Nobs] = meshgrid(SNR_values, theta_cap_values, Nobs_values);
+    
+    % Permute the meshgrid to match the data structure dimensions [SNR, theta_cap, Nobs]
+    % Original meshgrid creates [theta_cap, SNR, Nobs], so we need to permute
+    SNR = permute(SNR, [2, 1, 3]);  % Move SNR to first dimension
+    Theta = permute(Theta, [2, 1, 3]);  % Move theta_cap to second dimension
+    Nobs = permute(Nobs, [2, 1, 3]);  % Keep Nobs in third dimension
+    
+    % Remap SNR coordinates to evenly spaced positions
+    num_snr_values = length(SNR_values);
+    if num_snr_values > 1
+        % Create evenly spaced SNR positions
+        snr_spaced = linspace(min(SNR_values), max(SNR_values), num_snr_values);
+        
+        % Create mapping from actual SNR values to evenly spaced positions
+        snr_mapping = containers.Map(SNR_values, snr_spaced);
+        
+        % Remap SNR coordinates
+        SNR_remapped = zeros(size(SNR));
+        for i = 1:numel(SNR)
+            SNR_remapped(i) = snr_mapping(SNR(i));
+        end
+        SNR = SNR_remapped;
+    end
     
     % Ensure all inputs are column vectors
     x = Theta(:);   % Column vector for x coordinates (theta_cap)
     y = Nobs(:);    % Column vector for y coordinates (Nobs)
-    z = SNR(:);     % Column vector for z coordinates (SNR)
+    z = SNR(:);     % Column vector for z coordinates (SNR) - now evenly spaced
     c = metric_values(:);  % Column vector for colors
 
     % Create scatter plot with color based on metric values
     h = scatter3(x, y, z, 100, c, 'filled');
     
     % Load custom colormap
-    cmap_data = load('custom_PiYG_colormap.mat');
-    colormap(cmap_data.custom_map);
+    cmap_data = load('METRIC_CMAP.mat');
+    colormap(cmap_data.METRIC_CMAP);
     
     % Customize appearance
     colorbar;
@@ -57,7 +81,7 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric
     
     % Add grid and adjust view
     grid on;
-    view(-35, 78);
+    view(-35, 85);
     
     % Add colorbar label
     c = colorbar;
@@ -77,12 +101,27 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric
     % Set tick values to match the actual data points
     ax.XTick = theta_cap_values;
     ax.YTick = Nobs_values;
-    ax.ZTick = SNR_values;
+    
+    % Set SNR tick positions to the evenly spaced positions
+    if num_snr_values > 1
+        snr_spaced = linspace(min(SNR_values), max(SNR_values), num_snr_values);
+        ax.ZTick = snr_spaced;
+    else
+        ax.ZTick = SNR_values;
+    end
     
     % Format tick labels
     ax.XTickLabel = arrayfun(@(x) sprintf('%.0e', x), theta_cap_values, 'UniformOutput', false);
     ax.YTickLabel = arrayfun(@(x) sprintf('%.0f', x), Nobs_values, 'UniformOutput', false);
-    ax.ZTickLabel = arrayfun(@(x) sprintf('%.1f', x), SNR_values, 'UniformOutput', false);
+    
+    % Format SNR tick labels to show actual SNR values at evenly spaced positions
+    if num_snr_values > 1
+        % Create tick labels that correspond to the actual SNR values
+        snr_tick_labels = arrayfun(@(x) sprintf('%.1f', x), SNR_values, 'UniformOutput', false);
+        ax.ZTickLabel = snr_tick_labels;
+    else
+        ax.ZTickLabel = arrayfun(@(x) sprintf('%.1f', x), SNR_values, 'UniformOutput', false);
+    end
     
     % Rotate x-axis labels for better readability
     ax.XTickLabelRotation = 45;

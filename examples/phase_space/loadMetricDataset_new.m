@@ -56,6 +56,7 @@ function dataset_metrics = loadMetricDataset_new()
     dataset_metrics.Y_clean = cell(dims);    % Clean observations from synthetic data
     dataset_metrics.A0 = cell(dims);         % Ground truth kernels
     dataset_metrics.A0_noiseless = cell(dims); % noiseless ground truth kernels 
+    dataset_metrics.A0_noise_normalized = cell(dims); % the best ground truth kernels the algorithm can get  
     dataset_metrics.X0 = cell(dims);         % Ground truth activations
     dataset_metrics.Aout = cell(dims);       % Reconstructed kernels
     dataset_metrics.Xout = cell(dims);       % Reconstructed activations
@@ -118,8 +119,9 @@ function dataset_metrics = loadMetricDataset_new()
                    ~isempty(data.Xout{1}) && ~isempty(data.dataset_X0{1}) && ...
                    isfield(data, 'Aout') && isfield(data, 'dataset_A0')
                     % Get quality metrics without flipping
-                    [~, quality_scores] = detect_kernel_flip(data.dataset_X0, data.Xout, data.dataset_A0, data.Aout, true);
-                    
+                    %[~, quality_scores] = detect_kernel_flip(data.dataset_X0, data.Xout, data.dataset_A0, data.Aout, true);
+                    kk = synthetic_data.datasets(dataset_num).A0_noiseless;
+                    [~, quality_scores] = detect_kernel_flip(data.dataset_X0, data.Xout, kk, data.Aout, true);
                     % Store metrics from original order
                     kernel_quality_final = mean(quality_scores.no_flip.kernel_similarity);
                     dataset_metrics.kernel_quality_final(indices(1), indices(2), indices(3)) = kernel_quality_final;

@@ -24,8 +24,8 @@ fixed_params.N_single = N;                      % Input lattice size
 fixed_params.num_kernels = num_kernels;         % Number of kernels
 
 % Define parameter ranges for param_sets
-SNR_values = [3, 2, 1];                     % Different noise levels
-defect_density_values = logspace(-3, -1.5, 5);    % Different activation densities
+SNR_values = [3, 1, 0.5];                     % Different noise levels
+defect_density_values = logspace(-3, -1, 5);    % Different activation densities
 N_obs_values = [50, 100, 150, 200];           % Different observation lattice sizes
 
 % Create parameter set matrix
@@ -64,6 +64,16 @@ for i = 1:size(unique_combinations, 1)
         
         % Generate activation maps for this N_obs and density
         X0 = generate_activation_maps(N_obs, rho_d, fixed_params.p_scale, fixed_params.num_kernels);
+        
+        % Check for overlap between activations
+        overlap_fraction = mean(X0(:,:,1) & X0(:,:,2), 'all');
+        has_overlap = overlap_fraction > 0;
+        
+        % If there's overlap, regenerate automatically
+        if has_overlap
+            fprintf('Overlap detected (%.4f%%), regenerating...\n', 100*overlap_fraction);
+            continue;  % Skip to next iteration to regenerate
+        end
         
         % Display for review
         clf(act_fig);
@@ -235,24 +245,61 @@ fprintf('- Median: %.2e\n', median(area_ratios));
 
 %% Helper Functions
 function X0 = generate_activation_maps(N_single, rho_d, p_scale, num_kernels)
+    % Generate activation maps sequentially to ensure no overlap
+    % Each kernel can only activate sites that are not already occupied
+    
     % Initialize output
     X0 = zeros(N_single*p_scale, N_single*p_scale, num_kernels);
-    for k = 1: num_kernels
-        % Generate activation map with strict density control
-        target_defects = round(N_single * N_single * rho_d);  % Expected number of defects
-        tolerance = 0.1;  % 10% tolerance
-        min_defects = max(round(target_defects * (1-tolerance)), 1);
-        max_defects = round(target_defects * (1+tolerance));
+    
+    % Calculate target number of defects for each kernel
+    target_defects = round(N_single * N_single * rho_d);
+    tolerance = 0.1;  % 10% tolerance
+    min_defects = max(round(target_defects * (1-tolerance)), 1);
+    max_defects = round(target_defects * (1+tolerance));
+    
+    % Initialize occupancy map (tracks which sites are already occupied)
+    occupancy_map = false(N_single*p_scale, N_single*p_scale);
+    
+    % Generate activations sequentially for each kernel
+    for k = 1:num_kernels
+        % Calculate how many defects we need for this kernel
+        num_defects_needed = randi([min_defects, max_defects]);
         
-        X_good = false;
-        while ~X_good
-            X = double(rand(N_single, N_single) <= rho_d);
-            num_defects = sum(X(:));
-            X_good = (num_defects >= min_defects) && (num_defects <= max_defects);
+        % Find all unoccupied sites
+        [unoccupied_rows, unoccupied_cols] = find(~occupancy_map);
+        
+        if length(unoccupied_rows) < num_defects_needed
+            warning('Not enough unoccupied sites for kernel %d. Need %d, have %d. Using all available.', ...
+                k, num_defects_needed, length(unoccupied_rows));
+            num_defects_needed = length(unoccupied_rows);
         end
         
-        % Upsample X
-        X0(:,:,k) = upsample_with_zero_blocks(X, p_scale);
+        if num_defects_needed == 0
+            warning('No unoccupied sites available for kernel %d', k);
+            continue;
+        end
+        
+        % Randomly select sites from unoccupied positions
+        selected_indices = randperm(length(unoccupied_rows), num_defects_needed);
+        selected_rows = unoccupied_rows(selected_indices);
+        selected_cols = unoccupied_cols(selected_indices);
+        
+        % Place activations for this kernel
+        for i = 1:num_defects_needed
+            X0(selected_rows(i), selected_cols(i), k) = 1;
+            occupancy_map(selected_rows(i), selected_cols(i)) = true;  % Mark as occupied
+        end
+        
+        fprintf('Kernel %d: Placed %d activations on unoccupied sites\n', k, num_defects_needed);
+    end
+    
+    % Verify no overlap (sanity check)
+    total_activations = sum(X0, 3);
+    max_overlap = max(total_activations(:));
+    if max_overlap > 1
+        error('Overlap detected! Maximum overlap is %d at some sites', max_overlap);
+    else
+        fprintf('Successfully generated non-overlapping activation maps. Max overlap: %d\n', max_overlap);
     end
 end
 

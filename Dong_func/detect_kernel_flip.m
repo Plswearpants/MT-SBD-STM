@@ -20,7 +20,7 @@ function [is_flipped, quality_scores, Xout, Aout] = detect_kernel_flip(X0, Xout,
     % Handle cell array inputs
     if iscell(X0) && ~isempty(X0), X0 = X0{1}; end
     if iscell(Xout) && ~isempty(Xout), Xout = Xout{1}; end
-    if iscell(A0) && ~isempty(A0), A0 = A0{1}; end
+    if iscell(A0) && ~isempty(A0) && numel(A0) <= 1, A0 = A0{1}; end
     if iscell(Aout) && ~isempty(Aout), Aout = Aout{1}; end
     
     % Get kernel size from A0
