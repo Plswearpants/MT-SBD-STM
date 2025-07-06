@@ -23,9 +23,13 @@ function [is_flipped, quality_scores, Xout, Aout] = detect_kernel_flip(X0, Xout,
     if iscell(A0) && ~isempty(A0) && numel(A0) <= 1, A0 = A0{1}; end
     if iscell(Aout) && ~isempty(Aout), Aout = Aout{1}; end
     
-    % Get kernel size from A0
-    if ~isempty(A0) && iscell(A0) && numel(A0) >= 2
-        kernel_size = [size(A0{1}); size(A0{2})];
+    % Get kernel size from A0 (generalized for any number of kernels)
+    if ~isempty(A0) && iscell(A0)
+        num_kernels = numel(A0);
+        kernel_size = zeros(num_kernels, 2);
+        for k = 1:num_kernels
+            kernel_size(k,:) = size(A0{k});
+        end
     else
         error('Invalid kernel structure');
     end
@@ -41,27 +45,32 @@ function [is_flipped, quality_scores, Xout, Aout] = detect_kernel_flip(X0, Xout,
     if skip_flip_check
         is_flipped = false;
     else
-        % Case 2: Flipped case - swap kernels and activations
-        Xout_flip = cat(3, Xout(:,:,2), Xout(:,:,1));
-        Aout_flip = {Aout{2}, Aout{1}};  % Swap kernels
-        
-        [activation_similarity_flipped, kernel_similarity_flipped] = computeQualityMetrics(X0, Xout_flip, A0, Aout_flip, kernel_size);
-        
-        % Add flipped quality scores
-        quality_scores.flipped = struct('activation_similarity', activation_similarity_flipped, ...
-                                      'kernel_similarity', kernel_similarity_flipped);
-
-        % Determine if kernels should be flipped - flipped if all entries in quality are greater in flipped case
-        is_flipped = all(activation_similarity_flipped > activation_similarity) && all(kernel_similarity_flipped > kernel_similarity) && all(activation_similarity_flipped > 0.8) && all(kernel_similarity_flipped > 0.8);
-        
-        % Only print information if kernels are flipped
+        % For more than 2 kernels, check all permutations
+        nK = numel(A0);
+        perms_to_check = perms(1:nK);
+        best_score = -Inf;
+        best_perm = 1:nK;
+        for p = 1:size(perms_to_check,1)
+            perm = perms_to_check(p,:);
+            Xout_perm = Xout(:,:,perm);
+            Aout_perm = Aout(perm);
+            [as_perm, ks_perm] = computeQualityMetrics(X0, Xout_perm, A0, Aout_perm, kernel_size);
+            score = mean(as_perm) + mean(ks_perm);
+            if score > best_score
+                best_score = score;
+                best_perm = perm;
+                best_as = as_perm;
+                best_ks = ks_perm;
+            end
+        end
+        % Save best permutation as 'flipped'
+        quality_scores.flipped = struct('activation_similarity', best_as, ...
+                                        'kernel_similarity', best_ks);
+        is_flipped = ~isequal(best_perm, 1:nK);
         if is_flipped
-            fprintf('Kernels are FLIPPED (activation similarity improvement: %.3f -> %.3f , kernel similarity improvement: %.3f -> %.3f)\n', ...
-                quality_scores.no_flip.activation_similarity, quality_scores.flipped.activation_similarity, ...
-                quality_scores.no_flip.kernel_similarity, quality_scores.flipped.kernel_similarity);
-            % flip the kernels and activations
-            Xout = Xout_flip;
-            Aout = Aout_flip;
+            fprintf('Kernels are FLIPPED (best permutation: %s)\n', mat2str(best_perm));
+            Xout = Xout(:,:,best_perm);
+            Aout = Aout(best_perm);
         end
     end
 end

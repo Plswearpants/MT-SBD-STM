@@ -13,7 +13,7 @@
 % QPI: Fourier transformed dIdV data
 
 % Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy008.3ds', 5);
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy_QPI_24nm_3days002.3ds', 5);
 xsize = header.grid_dim(1);
 ysize = header.grid_dim(2);
 elayer = header.points;
@@ -144,7 +144,7 @@ real_space_direction = 'vertical';
 data_carried = data_plane;
 
 %% 2.4: crop dataset
-mask= maskSquare(data_carried,0,slice_normalize);
+mask= maskSquare(data_carried,0,slice_normalize,'rectangle');
 data_cropped= gridCropMask(data_carried, mask);
 data_carried = data_cropped;
 
@@ -214,13 +214,13 @@ axis square;
 % draw square on the data to include as many visible ripples of the scattering as possible 
 same_size = 1;
 kerneltype = 'selected';
-window_type = {'gaussian', 2.5};
+window_type = {'gaussian', 5};
 %window_type = '';
 
 
 if same_size
-    %[square_size] = squareDrawSize(Y_ref);
-    square_size=[80,80];
+    [square_size] = squareDrawSize(Y_ref);
+    %square_size=[80,80];
     kernel_sizes = repmat(square_size,[num_kernels,1]);
     A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
 else
@@ -254,7 +254,7 @@ end
 
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 7;
+outerloop_maxIT= 10;
 %params_ref.energy = energy_selected(params.ref_slice);
 params_ref.lambda1 = [0.03, 0.03,0.02, 0.05];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I

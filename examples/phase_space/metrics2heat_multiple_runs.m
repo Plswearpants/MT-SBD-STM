@@ -124,26 +124,84 @@ function h = plot_3D_heatspace_multiple(dataset_metrics_array, run_names, metric
     z = z(valid_idx);
     c = c(valid_idx);
     
-    % Create scatter plot
-    h = scatter3(x, y, z, 100, c, 'filled');
+    % Print statistics about non-overlapping datapoints
+    total_points = numel(combined_metric);
+    non_overlapping_points = sum(valid_idx);
+    overlapping_points = total_points - non_overlapping_points;
+    
+    fprintf('3D Phase Diagram Statistics:\n');
+    fprintf('- Total parameter combinations: %d\n', total_points);
+    fprintf('- Non-overlapping datapoints: %d\n', non_overlapping_points);
+    fprintf('- Overlapping datapoints (averaged): %d\n', overlapping_points);
+    fprintf('- Coverage: %.1f%%\n', 100 * non_overlapping_points / total_points);
+    
+    % Separate overlapping and non-overlapping points
+    overlapping_idx = point_counts(:) > 1;
+    overlapping_idx = overlapping_idx & valid_idx;
+    non_overlapping_idx = point_counts(:) == 1;
+    non_overlapping_idx = non_overlapping_idx & valid_idx;
+    
+    % Create scatter plots with different markers
+    hold on;
+    
+    % Plot non-overlapping points with circles
+    if any(non_overlapping_idx)
+        x_non = Theta(:);
+        y_non = Nobs(:);
+        z_non = SNR(:);
+        c_non = combined_metric(:);
+        
+        x_non = x_non(non_overlapping_idx);
+        y_non = y_non(non_overlapping_idx);
+        z_non = z_non(non_overlapping_idx);
+        c_non = c_non(non_overlapping_idx);
+        
+        h1 = scatter3(x_non, y_non, z_non, 100, c_non, 'o', 'filled');
+    end
+    
+    % Plot overlapping points with triangles
+    if any(overlapping_idx)
+        x_over = Theta(:);
+        y_over = Nobs(:);
+        z_over = SNR(:);
+        c_over = combined_metric(:);
+        
+        x_over = x_over(overlapping_idx);
+        y_over = y_over(overlapping_idx);
+        z_over = z_over(overlapping_idx);
+        c_over = c_over(overlapping_idx);
+        
+        h2 = scatter3(x_over, y_over, z_over, 100, c_over, '^', 'filled');
+    end
+    
+    hold off;
+    
+    % Return the first handle for compatibility
+    if any(non_overlapping_idx)
+        h = h1;
+    elseif any(overlapping_idx)
+        h = h2;
+    else
+        h = [];
+    end
     
     % Load custom colormap
-    cmap_data = load('METRIC_CMAP.mat');
-    colormap(cmap_data.METRIC_CMAP);
+    cmap_data = load('metric_colormapv2.mat');
+    colormap(cmap_data.CustomColormap);
     
     % Customize appearance
     colorbar;
     clim([0 1]);
     
     % Add labels and title
-    xlabel('defect density');
-    ylabel('N_{obs}');
-    zlabel('SNR');
+    xlabel('');
+    ylabel('');
+    zlabel('');
     title(sprintf('%s (Combined %d Runs)', title_str, length(dataset_metrics_array)));
     
     % Add grid and adjust view
     grid on;
-    view(-35, 85);
+    view(-35, 79);
     
     % Add colorbar label
     c = colorbar;
@@ -183,10 +241,12 @@ function h = plot_3D_heatspace_multiple(dataset_metrics_array, run_names, metric
     end
     
     % Rotate x-axis labels
-    ax.XTickLabelRotation = 45;
+    ax.XTickLabelRotation = 90;
+    axis square;
     
-    % Add legend showing number of runs
-    legend_text = sprintf('Combined %d runs', length(dataset_metrics_array));
-    text(0.02, 0.98, legend_text, 'Units', 'normalized', ...
-         'VerticalAlignment', 'top', 'FontSize', 10, 'FontWeight', 'bold');
+    % Increase tick mark size
+    ax.TickLength = [0.02 0.02];  % [length width] - default is [0.01 0.025]
+    
+    % Increase tick label font size
+    ax.FontSize = 15;  % Increase from default (usually 10-12)
 end 

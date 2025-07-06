@@ -66,8 +66,8 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric
     h = scatter3(x, y, z, 100, c, 'filled');
     
     % Load custom colormap
-    cmap_data = load('METRIC_CMAP.mat');
-    colormap(cmap_data.METRIC_CMAP);
+    cmap_data = load('metric_colormapv3.mat');
+    colormap(cmap_data.CustomColormap);
     
     % Customize appearance
     colorbar;

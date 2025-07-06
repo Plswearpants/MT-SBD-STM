@@ -25,8 +25,8 @@ fixed_params.num_kernels = num_kernels;         % Number of kernels
 
 % Define parameter ranges for param_sets
 SNR_values = [3, 1, 0.5];                     % Different noise levels
-defect_density_values = logspace(-3, -1, 5);    % Different activation densities
-N_obs_values = [50, 100, 150, 200];           % Different observation lattice sizes
+defect_density_values = logspace(-3, -1, 4);    % Different activation densities
+N_obs_values = [50, 100, 150];           % Different observation lattice sizes
 
 % Create parameter set matrix
 [S, D, N] = meshgrid(SNR_values, defect_density_values, N_obs_values);
@@ -65,8 +65,8 @@ for i = 1:size(unique_combinations, 1)
         % Generate activation maps for this N_obs and density
         X0 = generate_activation_maps(N_obs, rho_d, fixed_params.p_scale, fixed_params.num_kernels);
         
-        % Check for overlap between activations
-        overlap_fraction = mean(X0(:,:,1) & X0(:,:,2), 'all');
+        % Check for overlap between activations (generalized for any number of kernels)
+        overlap_fraction = mean(sum(X0,3) > 1, 'all');
         has_overlap = overlap_fraction > 0;
         
         % If there's overlap, regenerate automatically
@@ -78,15 +78,23 @@ for i = 1:size(unique_combinations, 1)
         % Display for review
         clf(act_fig);
         
-        % Create RGB image combining both activations
+        % Create RGB image combining up to 3 activations for visualization
         rgb_activation = zeros([N_obs*fixed_params.p_scale N_obs*fixed_params.p_scale 3]);
-        rgb_activation(:,:,1) = X0(:,:,1);  % First activation in red channel
-        rgb_activation(:,:,2) = X0(:,:,2);  % Second activation in green channel
+        for ch = 1:min(3, fixed_params.num_kernels)
+            rgb_activation(:,:,ch) = X0(:,:,ch);
+        end
         
         % Display combined activations
         imagesc(rgb_activation);
-        title(sprintf('Combined Activations (ρ_d=%.2e, N_{obs}=%d)\nRed: Kernel 1, Green: Kernel 2\nYellow: Overlap', ...
-            rho_d, N_obs), 'FontSize', 12);
+        if fixed_params.num_kernels == 2
+            title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d)\nRed: Kernel 1, Green: Kernel 2\nYellow: Overlap', ...
+                rho_d, N_obs), 'FontSize', 12);
+        elseif fixed_params.num_kernels == 3
+            title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d)\nRed: Kernel 1, Green: Kernel 2, Blue: Kernel 3', ...
+                rho_d, N_obs), 'FontSize', 12);
+        else
+            title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d)...'), 'FontSize', 12, 'Interpreter', 'tex');
+        end
         axis square;
         
         % Add colorbar with custom labels
@@ -106,16 +114,21 @@ for i = 1:size(unique_combinations, 1)
                                'Position', [140 20 100 40], ...
                                'Callback', @(src,event) confirm_dataset());
         
-        % Add text showing activation statistics
-        stats_str = sprintf('Activation Rates:\nKernel 1: %.4f%%\nKernel 2: %.4f%%\nOverlap: %.4f%%', ...
-            100*mean(X0(:,:,1),'all'), ...
-            100*mean(X0(:,:,2),'all'), ...
-            100*mean(X0(:,:,1) & X0(:,:,2), 'all'));
+        % Add text showing activation statistics for all kernels
+        activation_rates = zeros(1, fixed_params.num_kernels);
+        for k = 1:fixed_params.num_kernels
+            activation_rates(k) = 100*mean(X0(:,:,k), 'all');
+        end
+        stats_str = sprintf('Activation Rates:\n');
+        for k = 1:fixed_params.num_kernels
+            stats_str = [stats_str, sprintf('Kernel %d: %.4f%%\n', k, activation_rates(k))];
+        end
+        stats_str = [stats_str, sprintf('Overlap: %.4f%%', 100*overlap_fraction)];
         
         uicontrol('Parent', act_fig, ...
                  'Style', 'text', ...
                  'String', stats_str, ...
-                 'Position', [260 20 200 60], ...
+                 'Position', [260 20 200 60+20*(fixed_params.num_kernels-2)], ...
                  'BackgroundColor', get(act_fig, 'Color'), ...
                  'HorizontalAlignment', 'left');
         
@@ -299,7 +312,7 @@ function X0 = generate_activation_maps(N_single, rho_d, p_scale, num_kernels)
     if max_overlap > 1
         error('Overlap detected! Maximum overlap is %d at some sites', max_overlap);
     else
-        fprintf('Successfully generated non-overlapping activation maps. Max overlap: %d\n', max_overlap);
+        fprintf('Successfully generated non-overlapping activation maps for %d kernels. Max overlap: %d\n', num_kernels, max_overlap);
     end
 end
 
