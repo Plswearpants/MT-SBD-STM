@@ -47,7 +47,7 @@ subplot(2, 2, 1);
 imagesc(data);
 title('Original Data');
 axis square;
-colormap parula;
+colormap gray;
 colorbar;
 
 % Plot Laplacian
@@ -55,7 +55,7 @@ subplot(2, 2, 2);
 h_plot = imagesc(L_mag);
 title('X-Direction Laplacian Magnitude');
 axis square;
-colormap parula;
+colormap gray;
 colorbar;
 
 % Plot histogram with dual y-axis
@@ -79,7 +79,7 @@ subplot(2, 2, 4);
 h_corrected = imagesc(data);
 title('Corrected Image');
 axis square;
-colormap parula;
+colormap gray;
 colorbar;
 
 % Create controls

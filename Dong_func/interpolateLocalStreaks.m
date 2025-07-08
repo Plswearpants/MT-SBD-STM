@@ -68,15 +68,15 @@ subplot(2, 2, 1);
 h_orig = imagesc(data);
 title('Original Data');
 axis square;
-colormap parula;
+colormap gray;
 colorbar;
 
-% Plot Laplacian
+% Plot binary mask (initially all zeros)
 subplot(2, 2, 2);
-h_plot = imagesc(L_mag);
-title('X-Direction Laplacian Magnitude');
+h_mask = imagesc(false(size(L_mag)));
+title('Detected Streak Mask');
 axis square;
-colormap parula;
+colormap gray;
 colorbar;
 
 % Plot histogram
@@ -95,7 +95,7 @@ subplot(2, 2, 4);
 h_corrected = imagesc(data);
 title('Corrected Image');
 axis square;
-colormap parula;
+colormap gray;
 colorbar;
 
 % Create controls
@@ -124,13 +124,13 @@ min_text = uicontrol(panel, 'Style', 'text', ...
 done_button = uicontrol(panel, 'Style', 'pushbutton', ...
     'String', 'Done', ...
     'Position', [450, 5, 100, 40], ...
-    'Callback', @(src,event) finish(src, h_corrected, h_plot));
+    'Callback', @(src,event) finish(src, h_corrected, h_mask));
 
 % Set up callbacks with debounce
-set(min_slider, 'Callback', @(src,event) debouncedUpdate(src, event, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button));
+set(min_slider, 'Callback', @(src,event) debouncedUpdate(src, event, h_mask, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button));
 
 % Initialize display
-updateContrast(min_slider, [], h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button);
+updateContrast(min_slider, [], h_mask, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button);
 
 % Wait for the figure to be closed
 waitfor(h_fig);
@@ -145,7 +145,7 @@ end
 
 end
 
-function finish(src, h_corrected, h_plot)
+function finish(src, h_corrected, h_mask)
     % Get the current values from the button's UserData
     user_data = get(src, 'UserData');
     min_val = user_data(1).min_val;
@@ -153,7 +153,7 @@ function finish(src, h_corrected, h_plot)
     
     % Get the results
     corrected_data = get(h_corrected, 'CData');
-    streak_mask = get(h_plot, 'CData') >= min_val & get(h_plot, 'CData') <= max_val;
+    streak_mask = get(h_mask, 'CData');
     [streak_rows, streak_cols] = find(streak_mask);
     streak_indices = [streak_rows, streak_cols];
     
@@ -166,7 +166,7 @@ function finish(src, h_corrected, h_plot)
     close(gcf);
 end
 
-function debouncedUpdate(src, event, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button)
+function debouncedUpdate(src, event, h_mask, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button)
     persistent lastUpdate
     if isempty(lastUpdate)
         lastUpdate = tic;
@@ -174,25 +174,23 @@ function debouncedUpdate(src, event, h_plot, min_text, h_corrected, data, L_mag,
     
     % Only update if 0.1 seconds have passed since last update
     if toc(lastUpdate) > 0.1
-        updateContrast(src, event, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button);
+        updateContrast(src, event, h_mask, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button);
         lastUpdate = tic;
     end
 end
 
-function updateContrast(src, ~, h_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button)
+function updateContrast(src, ~, h_mask, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button)
     % Get current values
     min_val = get(src, 'Value');
     max_val = max(L_mag(:));
     
-    % Update display
-    caxis(h_plot.Parent, [min_val, max_val]);
+    % Update binary mask visualization
+    streak_mask = L_mag >= min_val & L_mag <= max_val;
+    set(h_mask, 'CData', streak_mask);
     caxis(h_corrected.Parent, [min(data(:)), max(data(:))]);
     set(min_text, 'String', sprintf('%.3f', min_val));
     set(h_min_line, 'Value', min_val);
     set(h_max_line, 'Value', max_val);
-    
-    % Find streaks using vectorized operations
-    streak_mask = L_mag >= min_val & L_mag <= max_val;
     
     % Process valid streaks
     valid_streaks = streak_mask;

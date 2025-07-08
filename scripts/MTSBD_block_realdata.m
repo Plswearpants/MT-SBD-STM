@@ -13,7 +13,7 @@
 % QPI: Fourier transformed dIdV data
 
 % Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid Spectroscopy_QPI_24nm_3days002.3ds', 5);
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('QPImap012.3ds', 5);
 xsize = header.grid_dim(1);
 ysize = header.grid_dim(2);
 elayer = header.points;
@@ -64,7 +64,7 @@ switch method
         [data_masked, ~] = defect_masking(data_carried, index);
     case 'tg'
         % Apply flat disk mask with Gaussian smoothing
-        [data_masked, defect_loc] = gaussianMaskDefects(Y,index, num_defect_type);
+        [data_masked, defect_loc] = gaussianMaskDefects(data_carried,index, num_defect_type);
     case 'threshold'
         % Apply threshold-based defect masking
         [data_masked, defect_mask] = thresholdDefects(data_carried, index);
@@ -72,11 +72,6 @@ switch method
         error('Unknown defect masking method. Choose "gw", "disk", or "threshold".');
 end
 data_carried = data_masked;
-%% Apply 2D gaussian smoothing to each slice
-%sigma = 1;
-%for i = 1:size(data_carried,3)
-%    data_carried(:,:,i) = imgaussfilt(data_carried(:,:,i), sigma);
-%end
 
 %% 2.3a: Correct streak
 % Normalize background 
@@ -148,40 +143,33 @@ mask= maskSquare(data_carried,0,slice_normalize,'rectangle');
 data_cropped= gridCropMask(data_carried, mask);
 data_carried = data_cropped;
 
-%% 2.end: Normalize background 
-[Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
-
-%% 3pre: Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('LiFeAs_preprocessed_selected.mat', 'Y', 'data_masked', 'data_cropped', 'data_braggremoved', 'data_original', "energy_range",'energy_selected','defect_loc')
-
-
-%% Block 3 data selection 
+%% 2.5 data selection 
 rangetype='dynamic';
 f1=figure;
-d3gridDisplay(Y,rangetype);
+d3gridDisplay(data_carried,rangetype);
 params.slices = input('input a list of slices: ');
 Y=data_carried(:,:,params.slices);
 energy_selected = energy_range(params.slices);
 close(f1);
-num_slices = size(Y,3);
+num_slices = size(data_carried,3);
 
-%% 3.2 Local streak removal and interpolation 
-Y_local_removed = zeros(size(Y));
-for s = 1:size(Y,3)
-    [~, var_list, low_list] = streak_correction(Y(:,:,s),'both');
+%% 2.6 Local streak removal and interpolation 
+Y_local_removed = zeros(size(data_carried));
+for s = 2:size(data_carried,3)
+    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3);
     figure; plot(low_list, var_list);
     [min_var,min_idx]=min(var_list);
     min_low = low_list(min_idx);
-    [corrected_data, ~] = removeLocalStreaks_left(Y, s, min_low);
-    [~, var_list, low_list] = streak_correction(corrected_data,'both');
-    figure; plot(low_list, var_list);
-    [min_var,min_idx]=min(var_list);
-    min_low = low_list(min_idx);
-    [corrected_data, ~] = removeLocalStreaks(Y, s, min_low);
+    [corrected_data, ~] = removeLocalStreaks(data_carried, s, min_low);
     [Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(corrected_data, 1, 0.8*min_low);
 end
-%% 3.end: Normalize background 
-[Y] = normalizeBackgroundToZeroMean3D(Y, rangetype, 1);
+Y_carried = Y_local_removed;
+%% 2.end: Normalize background 
+[Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+
+%% 3. Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+save('LiFeAs_preprocessed_selected.mat', 'Y', 'data_masked', 'data_cropped', 'data_braggremoved', 'data_original', "energy_range",'energy_selected','defect_loc')
+
 %% 4_pre Pick reference slice and Initialize reference kernels
 f2=figure;
 d3gridDisplay(Y,rangetype);
