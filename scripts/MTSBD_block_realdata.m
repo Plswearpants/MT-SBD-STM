@@ -29,21 +29,8 @@ rangetype='dynamic';
 figure;
 d3gridDisplay(data_carried,rangetype);
 slice_normalize = input('slice to normalize: ');
-%% 2.1: Remove bragg peaks
-% Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
-% Bragg remove
-[data_braggremoved]=removeBragg(data_carried);
-data_carried = data_braggremoved;
 
-%% 2.1a: Correct streak
-% Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
-
-[data_streakremoved, QPI_nostreaks] = RemoveStreaks(data_carried, 'Direction', 'vertical');
-data_carried = data_streakremoved;
-
-%% 2.2b defect masking
+%% 2.1 defect masking
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
@@ -73,13 +60,14 @@ switch method
 end
 data_carried = data_masked;
 
-%% 2.3a: Correct streak
+%% 2.2a: Correct streak
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
 [data_streakremoved, QPI_nostreaks] = RemoveStreaks(data_carried, 'Direction', 'vertical');
 data_carried = data_streakremoved;
-%% 2.3b: heal
+
+%% 2.2b: heal
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
@@ -130,7 +118,7 @@ d3gridDisplay(log(abs(qpiCalculate(data_streakremoved_healed))),rangetype);
 
 data_carried = data_streakremoved_healed;
 
-%% 2.3c: directional_plane (remove slope at one direction, optional)
+%% 2.2c: directional_plane (remove slope at one direction, optional)
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
@@ -138,22 +126,7 @@ real_space_direction = 'vertical';
 [data_plane, mask] = d3plane_directional(data_carried, real_space_direction, 'LineWidth', 5);
 data_carried = data_plane;
 
-%% 2.4: crop dataset
-mask= maskSquare(data_carried,0,slice_normalize,'rectangle');
-data_cropped= gridCropMask(data_carried, mask);
-data_carried = data_cropped;
-
-%% 2.5 data selection 
-rangetype='dynamic';
-f1=figure;
-d3gridDisplay(data_carried,rangetype);
-params.slices = input('input a list of slices: ');
-Y=data_carried(:,:,params.slices);
-energy_selected = energy_range(params.slices);
-close(f1);
-num_slices = size(data_carried,3);
-
-%% 2.6 Local streak removal and interpolation 
+%% 2.3 Local streak removal and interpolation 
 Y_local_removed = zeros(size(data_carried));
 for s = 2:size(data_carried,3)
     [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3);
@@ -163,7 +136,30 @@ for s = 2:size(data_carried,3)
     [corrected_data, ~] = removeLocalStreaks(data_carried, s, min_low);
     [Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(corrected_data, 1, 0.8*min_low);
 end
-Y_carried = Y_local_removed;
+data_carried = Y_local_removed;
+
+%% 2.4: Remove bragg peaks
+% Normalize background 
+[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+% Bragg remove
+[data_braggremoved]=removeBragg(data_carried);
+data_carried = data_braggremoved;
+
+%% 2.5: crop dataset
+mask= maskSquare(data_carried,0,slice_normalize,'rectangle');
+data_cropped= gridCropMask(data_carried, mask);
+data_carried = data_cropped;
+
+%% 2.6 data selection 
+rangetype='dynamic';
+f1=figure;
+d3gridDisplay(data_carried,rangetype);
+params.slices = input('input a list of slices: ');
+Y=data_carried(:,:,params.slices);
+energy_selected = energy_range(params.slices);
+close(f1);
+num_slices = size(data_carried,3);
+
 %% 2.end: Normalize background 
 [Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
