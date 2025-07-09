@@ -126,45 +126,74 @@ real_space_direction = 'vertical';
 [data_plane, mask] = d3plane_directional(data_carried, real_space_direction, 'LineWidth', 5);
 data_carried = data_plane;
 
-%% 2.3 Local streak removal and interpolation 
-Y_local_removed = zeros(size(data_carried));
-for s = 2:size(data_carried,3)
-    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3);
-    figure; plot(low_list, var_list);
-    [min_var,min_idx]=min(var_list);
-    min_low = low_list(min_idx);
-    [corrected_data, ~] = removeLocalStreaks(data_carried, s, min_low);
-    [Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(corrected_data, 1, 0.8*min_low);
-end
-data_carried = Y_local_removed;
-
-%% 2.4: Remove bragg peaks
+%% 2.3: Remove bragg peaks
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 % Bragg remove
 [data_braggremoved]=removeBragg(data_carried);
 data_carried = data_braggremoved;
 
-%% 2.5: crop dataset
-mask= maskSquare(data_carried,0,slice_normalize,'rectangle');
-data_cropped= gridCropMask(data_carried, mask);
-data_carried = data_cropped;
-
-%% 2.6 data selection 
+%% 2.4 data selection 
 rangetype='dynamic';
 f1=figure;
 d3gridDisplay(data_carried,rangetype);
 params.slices = input('input a list of slices: ');
-Y=data_carried(:,:,params.slices);
+data_selected=data_carried(:,:,params.slices);
 energy_selected = energy_range(params.slices);
 close(f1);
 num_slices = size(data_carried,3);
+data_carried = data_selected; 
+
+%% 2.5 Local streak removal and interpolation 
+Y_local_removed = zeros(size(data_carried));
+for s = 1:size(data_carried,3)
+    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'valley');
+    figure; plot(low_list, var_list);
+    [min_var,min_idx]=min(var_list);
+    min_low = low_list(min_idx);
+
+    [corrected_data, ~] = removeLocalStreaks(data_carried, s, min_low, 3,'valley');
+
+    [Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(corrected_data, 1, 0.8* min_low);
+end
+data_carried = Y_local_removed;
+
+%% 2.5_auto: Automated Local Streak Removal and Interpolation (No UI)
+% This block runs streak correction, local streak removal, and interpolation in batch mode.
+
+Y_local_removed_auto = zeros(size(data_carried));
+for s = 1:size(data_carried,3)
+    % 1. Find optimal threshold automatically (e.g., by minimizing variance)
+    [~, var_list, low_list] = streak_correction(data_carried(:,:,s), 3, 'valley');
+    [~, min_idx] = min(var_list);
+    min_low = low_list(min_idx);
+
+    % 2. Remove local streaks automatically (no UI)
+    [corrected_data, ~] = removeLocalStreaks(data_carried, s, min_low, 3, 'valley', true);
+
+    % 3. Interpolate local streaks automatically (no UI)
+    [Y_local_removed_auto(:,:,s), ~] = interpolateLocalStreaks(corrected_data, 1, min_low, [], true);
+    
+    % print finished status
+    fprintf('Finished slice %d\n', s);
+end
+data_carried = Y_local_removed_auto;
+
+%% 2.6: crop dataset
+mask= maskSquare(data_carried,0,slice_normalize,'square');
+data_cropped= gridCropMask(data_carried, mask);
+data_carried = data_cropped;
+
+%% 2.51 Gaussian smoothing in spatial domain 
+[data_carried] = smoothdata(data_carried, 2);
+
+
 
 %% 2.end: Normalize background 
 [Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
 %% 3. Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('LiFeAs_preprocessed_selected.mat', 'Y', 'data_masked', 'data_cropped', 'data_braggremoved', 'data_original', "energy_range",'energy_selected','defect_loc')
+save('ZrSiTe_positivebias_preprocessed.mat', 'Y', 'data_masked', 'data_cropped', 'data_braggremoved', "Y_local_removed_auto",'data_original', "energy_range",'energy_selected','defect_loc')
 
 %% 4_pre Pick reference slice and Initialize reference kernels
 f2=figure;
@@ -203,8 +232,8 @@ window_type = {'gaussian', 5};
 
 
 if same_size
-    [square_size] = squareDrawSize(Y_ref);
-    %square_size=[80,80];
+    %[square_size] = squareDrawSize(Y_ref);
+    square_size=[80,80];
     kernel_sizes = repmat(square_size,[num_kernels,1]);
     A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
 else
@@ -240,7 +269,7 @@ end
 miniloop_iteration = 1;
 outerloop_maxIT= 10;
 %params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.03, 0.03,0.02, 0.05];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.03, 0.03,0.03, 0.03];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.2 * kernel_sizes);
@@ -340,178 +369,224 @@ visualizeRealResult(Y_ref,A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad);
 padfilename = sprintf('MTSBD_LiFeAs_%f meV.mat',1000*params_ref.energy);
 %save(padfilename,'Y_ref','A_ref_pad', 'X_ref_pad', 'b_ref_pad', 'extras_ref_pad', 'params_ref');
 save(padfilename,'Y_ref','A_ref', 'X_ref', 'b_ref', 'extras_ref', 'params_ref');
+
 %% Block 3: Find Most Isolated Points and Initialize Kernels
-fprintf('Calculating isolation scores and finding most isolated points...\n');
+num_slices = size(Y,3);
 
-% Choose target kernel sizes first
-type = 'kernel_sizes_all';
-if strcmp(type, 'ref_kernel_sizes')
-    target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
-elseif strcmp(type, 'kernel_sizes_cap')
-    target_kernel_sizes = squeeze(max(kernel_sizes,[],1));
-elseif strcmp(type, 'kernel_sizes_all')
-    target_kernel_sizes = kernel_sizes;
-end
+% Choose method for kernel center selection
+fprintf('Choose method for kernel center selection:\n');
+fprintf('1. Find most isolated points automatically\n');
+fprintf('2. Manually select 3 kernel centers\n');
+choice = input('Enter choice (1 or 2): ');
 
-% Get defect positions from X_ref
-most_isolated_points = cell(1, num_kernels);
-isolation_scores = cell(1, num_kernels);
-defect_positions = cell(1, num_kernels);
-num_defects = zeros(1, num_kernels);
-
-% Create figure for activation value distributions
-figure('Name', 'Activation Value Distributions');
-for k = 1:num_kernels
-    % Plot histogram of activation values
-    subplot(2, num_kernels, k);
-    activation_values = X_ref(:,:,k);
-    h = histogram(activation_values(activation_values > 0), 50);
-    set(gca, 'YScale', 'log');
-    title(sprintf('Kernel %d Activation Distribution', k));
-    xlabel('Activation Value');
-    ylabel('Frequency (log scale)');
+if choice == 1
+    fprintf('Calculating isolation scores and finding most isolated points...\n');
     
-    % Add vertical line for threshold
-    %threshold = max(X_ref(:,:,k),[],'all')/10;
-    threshold = 0;
-    hold on;
-    xline(threshold, 'r--', 'Threshold');
-    hold off;
-    
-    % Plot cumulative distribution
-    subplot(2, num_kernels, k + num_kernels);
-    [counts, edges] = histcounts(activation_values(activation_values > 0), 50, 'Normalization', 'cdf');
-    stairs(edges(1:end-1), counts);
-    title(sprintf('Kernel %d Cumulative Distribution', k));
-    xlabel('Activation Value');
-    ylabel('Cumulative Frequency');
-    hold on;
-    xline(threshold, 'r--', 'Threshold');
-    hold off;
-    
-    % Get positions of defects above threshold
-    [rows, cols] = find(X_ref(:,:,k) > threshold);
-    defect_positions{k} = [rows, cols];
-    num_defects(k) = size(defect_positions{k}, 1);
-    fprintf('Kernel %d has %d defects above threshold %.4f\n', k, num_defects(k), threshold);
-end
-
-% Calculate isolation scores for each kernel
-for k = 1:num_kernels
-    if num_defects(k) == 0
-        warning('No defects found for kernel %d', k);
-        continue;
+    % Choose target kernel sizes first
+    type = 'kernel_sizes_all';
+    if strcmp(type, 'ref_kernel_sizes')
+        target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
+    elseif strcmp(type, 'kernel_sizes_cap')
+        target_kernel_sizes = squeeze(max(kernel_sizes,[],1));
+    elseif strcmp(type, 'kernel_sizes_all')
+        target_kernel_sizes = kernel_sizes;
     end
-    
-    % Create summed activation map of all other kernels
-    X_others = zeros(size(X_ref(:,:,1)));
-    for l = 1:num_kernels
-        if l ~= k
-            X_others = X_others + X_ref(:,:,l);
-        end
-    end
-    
-    % Get positions of defects in other kernels
-    [other_rows, other_cols] = find(X_others > max(X_others,[],'all')/10);
-    other_positions = [other_rows, other_cols];
-    
-    % Use target kernel size for boundary check
-    half_kernel_size = floor(target_kernel_sizes(k,:)/2);
-    
-    % First filter out points too close to boundaries
-    valid_points = true(num_defects(k), 1);
-    for i = 1:num_defects(k)
-        y = defect_positions{k}(i,1);
-        x = defect_positions{k}(i,2);
+
+    % Get defect positions from X_ref
+    most_isolated_points = cell(1, num_kernels);
+    isolation_scores = cell(1, num_kernels);
+    defect_positions = cell(1, num_kernels);
+    num_defects = zeros(1, num_kernels);
+
+    % Create figure for activation value distributions
+    figure('Name', 'Activation Value Distributions');
+    for k = 1:num_kernels
+        % Plot histogram of activation values
+        subplot(2, num_kernels, k);
+        activation_values = X_ref(:,:,k);
+        h = histogram(activation_values(activation_values > 0), 50);
+        set(gca, 'YScale', 'log');
+        title(sprintf('Kernel %d Activation Distribution', k));
+        xlabel('Activation Value');
+        ylabel('Frequency (log scale)');
         
-        if y <= half_kernel_size(1) || y >= size(X_ref,1) - half_kernel_size(1) || ...
-           x <= half_kernel_size(2) || x >= size(X_ref,2) - half_kernel_size(2)
-            valid_points(i) = false;
-        end
+        % Add vertical line for threshold
+        %threshold = max(X_ref(:,:,k),[],'all')/10;
+        threshold = 0;
+        hold on;
+        xline(threshold, 'r--', 'Threshold');
+        hold off;
+        
+        % Plot cumulative distribution
+        subplot(2, num_kernels, k + num_kernels);
+        [counts, edges] = histcounts(activation_values(activation_values > 0), 50, 'Normalization', 'cdf');
+        stairs(edges(1:end-1), counts);
+        title(sprintf('Kernel %d Cumulative Distribution', k));
+        xlabel('Activation Value');
+        ylabel('Cumulative Frequency');
+        hold on;
+        xline(threshold, 'r--', 'Threshold');
+        hold off;
+        
+        % Get positions of defects above threshold
+        [rows, cols] = find(X_ref(:,:,k) > threshold);
+        defect_positions{k} = [rows, cols];
+        num_defects(k) = size(defect_positions{k}, 1);
+        fprintf('Kernel %d has %d defects above threshold %.4f\n', k, num_defects(k), threshold);
     end
-    
-    % Only proceed with valid points
-    valid_defects = defect_positions{k}(valid_points,:);
-    if isempty(valid_defects)
-        error('No valid isolated points found for kernel %d - all points are too close to image boundaries', k);
-    end
-    
-    % Calculate isolation scores only for valid points
-    S_k = zeros(size(valid_defects, 1), 1);
-    for i = 1:size(valid_defects, 1)
-        diffs = other_positions - valid_defects(i,:);
-        distances = sum(diffs.^2, 2);
-        S_k(i) = min(distances);
-    end
-    
-    % Find the most isolated point among valid points
-    [max_score, max_idx] = max(S_k);
-    valid_indices = find(valid_points);
-    max_idx = valid_indices(max_idx);
-    
-    most_isolated_points{k} = defect_positions{k}(max_idx,:);
-    isolation_scores{k} = S_k;
-    
-    fprintf('Kernel %d: Most isolated point at (%d,%d) with score %.2f\n', ...
-        k, most_isolated_points{k}(1), most_isolated_points{k}(2), max_score);
-end
 
-% Visualize the results
-figure('Name', 'Isolation Analysis');
-for k = 1:num_kernels
-    subplot(2, num_kernels, k);
-    imagesc(X_ref(:,:,k));
+    % Calculate isolation scores for each kernel
+    for k = 1:num_kernels
+        if num_defects(k) == 0
+            warning('No defects found for kernel %d', k);
+            continue;
+        end
+        
+        % Create summed activation map of all other kernels
+        X_others = zeros(size(X_ref(:,:,1)));
+        for l = 1:num_kernels
+            if l ~= k
+                X_others = X_others + X_ref(:,:,l);
+            end
+        end
+        
+        % Get positions of defects in other kernels
+        [other_rows, other_cols] = find(X_others > max(X_others,[],'all')/10);
+        other_positions = [other_rows, other_cols];
+        
+        % Use target kernel size for boundary check
+        half_kernel_size = floor(target_kernel_sizes(k,:)/2);
+        
+        % First filter out points too close to boundaries
+        valid_points = true(num_defects(k), 1);
+        for i = 1:num_defects(k)
+            y = defect_positions{k}(i,1);
+            x = defect_positions{k}(i,2);
+            
+            if y <= half_kernel_size(1) || y >= size(X_ref,1) - half_kernel_size(1) || ...
+               x <= half_kernel_size(2) || x >= size(X_ref,2) - half_kernel_size(2)
+                valid_points(i) = false;
+            end
+        end
+        
+        % Only proceed with valid points
+        valid_defects = defect_positions{k}(valid_points,:);
+        if isempty(valid_defects)
+            error('No valid isolated points found for kernel %d - all points are too close to image boundaries', k);
+        end
+        
+        % Calculate isolation scores only for valid points
+        S_k = zeros(size(valid_defects, 1), 1);
+        for i = 1:size(valid_defects, 1)
+            diffs = other_positions - valid_defects(i,:);
+            distances = sum(diffs.^2, 2);
+            S_k(i) = min(distances);
+        end
+        
+        % Find the most isolated point among valid points
+        [max_score, max_idx] = max(S_k);
+        valid_indices = find(valid_points);
+        max_idx = valid_indices(max_idx);
+        
+        most_isolated_points{k} = defect_positions{k}(max_idx,:);
+        isolation_scores{k} = S_k;
+        
+        fprintf('Kernel %d: Most isolated point at (%d,%d) with score %.2f\n', ...
+            k, most_isolated_points{k}(1), most_isolated_points{k}(2), max_score);
+    end
+
+    % Visualize the results
+    figure('Name', 'Isolation Analysis');
+    for k = 1:num_kernels
+        subplot(2, num_kernels, k);
+        imagesc(X_ref(:,:,k));
+        hold on;
+        scatter(defect_positions{k}(:,2), defect_positions{k}(:,1), 50, 'w', 'o');
+        if ~isempty(most_isolated_points{k})
+            scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
+        end
+        title(sprintf('Kernel %d', k));
+        colorbar;
+        axis square;
+        hold off;
+        
+        subplot(2, num_kernels, k + num_kernels);
+        X_others = zeros(size(X_ref(:,:,1)));
+        for l = 1:num_kernels
+            if l ~= k
+                X_others = X_others + X_ref(:,:,l);
+            end
+        end
+        imagesc(X_others);
+        hold on;
+        if ~isempty(most_isolated_points{k})
+            scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
+        end
+        title(sprintf('Other Kernels (not %d)', k));
+        colorbar;
+        axis square;
+        hold off;
+    end
+
+    % Store isolation analysis results
+    isolation_analysis = struct();
+    isolation_analysis.defect_positions = defect_positions;
+    isolation_analysis.most_isolated_points = most_isolated_points;
+    isolation_analysis.isolation_scores = isolation_scores;
+    isolation_analysis.num_defects = num_defects;
+
+    % Display most isolated points
+    figure;
+    imagesc(Y_ref);
     hold on;
-    scatter(defect_positions{k}(:,2), defect_positions{k}(:,1), 50, 'w', 'o');
-    if ~isempty(most_isolated_points{k})
+    for k = 1:num_kernels
         scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
     end
-    title(sprintf('Kernel %d', k));
-    colorbar;
-    axis square;
-    hold off;
-    
-    subplot(2, num_kernels, k + num_kernels);
-    X_others = zeros(size(X_ref(:,:,1)));
-    for l = 1:num_kernels
-        if l ~= k
-            X_others = X_others + X_ref(:,:,l);
+
+    % Convert most_isolated_points to matrix format
+    kernel_centers = zeros(num_kernels, 2);
+    for k = 1:num_kernels
+        if ~isempty(most_isolated_points{k})
+            kernel_centers(k,:) = most_isolated_points{k};
+        else
+            error('No isolated point found for kernel %d', k);
         end
     end
-    imagesc(X_others);
-    hold on;
-    if ~isempty(most_isolated_points{k})
-        scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
-    end
-    title(sprintf('Other Kernels (not %d)', k));
+
+elseif choice == 2
+    fprintf('Manual kernel center selection mode...\n');
+    
+    % Display the reference image for manual selection
+    figure('Name', 'Manual Kernel Center Selection');
+    imagesc(Y_ref);
+    title('Click on 3 points to select kernel centers. Press Enter when done.');
+    colormap(gray);
     colorbar;
-    axis square;
-    hold off;
-end
-
-% Store isolation analysis results
-isolation_analysis = struct();
-isolation_analysis.defect_positions = defect_positions;
-isolation_analysis.most_isolated_points = most_isolated_points;
-isolation_analysis.isolation_scores = isolation_scores;
-isolation_analysis.num_defects = num_defects;
-
-% Display most isolated points
-figure;
-imagesc(Y_ref);
-hold on;
-for k = 1:num_kernels
-    scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
-end
-
-% Convert most_isolated_points to matrix format
-kernel_centers = zeros(num_kernels, 2);
-for k = 1:num_kernels
-    if ~isempty(most_isolated_points{k})
-        kernel_centers(k,:) = most_isolated_points{k};
-    else
-        error('No isolated point found for kernel %d', k);
+    
+    % Get user clicks for kernel centers
+    kernel_centers = zeros(num_kernels, 2);
+    for k = 1:num_kernels
+        fprintf('Click on center for kernel %d/%d\n', k, num_kernels);
+        [x, y] = ginput(1);
+        kernel_centers(k,:) = [round(y), round(x)]; % Convert to [row, col] format
+        
+        % Mark the selected point
+        hold on;
+        scatter(x, y, 100, 'r', '*');
+        text(x+5, y+5, sprintf('K%d', k), 'Color', 'red', 'FontSize', 12, 'FontWeight', 'bold');
+        hold off;
     end
+    
+    fprintf('Kernel centers selected:\n');
+    for k = 1:num_kernels
+        fprintf('Kernel %d: (%d, %d)\n', k, kernel_centers(k,1), kernel_centers(k,2));
+    end
+    
+    % Use target kernel sizes from the reference slice
+    target_kernel_sizes = kernel_sizes;
+    
+else
+    error('Invalid choice. Please enter 1 or 2.');
 end
 
 % Initialize kernels for all slices
@@ -557,12 +632,21 @@ for k = 1:num_kernels
 end
 
 eta_data3d = estimate_noise3D(Y, 'std');  
+
+%% initialize xinit for all slices with reference slice
+for k = 1:num_kernels
+    params.xinit{k}.X = X_ref(:,:,k);
+    b_temp = extras_ref.phase1.biter(k); 
+    params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
+end
+
+
 %% Run for all_slice
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 12;
+outerloop_maxIT= 8;
 
-params.lambda1 = [0.2, 0.2,0.03];  % regularization parameter for Phase I
+params.lambda1 = [0.03, 0.03, 0.03];  % regularization parameter for Phase I
 %params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params.phase2 = false;
 params.kplus = ceil(0.5 * kernel_sizes);

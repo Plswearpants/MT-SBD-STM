@@ -1,10 +1,11 @@
-function [corrected_list, var_list, lower_list] = streak_correction(data, max_streak_width)
+function [corrected_list, var_list, lower_list] = streak_correction(data, max_streak_width, mode)
 % STREAK_CORRECTION Corrects streaks in image data using multi-scale Laplacian-based detection
-%   [corrected_list, var_list, lower_list] = streak_correction(data, max_streak_width)
+%   [corrected_list, var_list, lower_list] = streak_correction(data, max_streak_width, mode)
 %
 % Inputs:
 %   data - 2D matrix containing the image data
 %   max_streak_width - Maximum streak width to detect (default: 3)
+%   mode - 'valley', 'plateau', or 'both' (default: 'both')
 %
 % Outputs:
 %   corrected_list - 3D matrix containing corrected images for different thresholds
@@ -13,12 +14,15 @@ function [corrected_list, var_list, lower_list] = streak_correction(data, max_st
 %
 % Example:
 %   data = Y(:,:,7);
-%   [corrected_list, var_list, lower_list] = streak_correction(data);  % Default max width 3
-%   [corrected_list, var_list, lower_list] = streak_correction(data, 5);  % Max width 5
+%   [corrected_list, var_list, lower_list] = streak_correction(data);  % Default max width 3, both
+%   [corrected_list, var_list, lower_list] = streak_correction(data, 5, 'valley');  % Max width 5, valley mode
 
 % Set default parameters
 if nargin < 2
     max_streak_width = 3;
+end
+if nargin < 3
+    mode = 'both';
 end
 
 [rows, cols] = size(data);
@@ -37,16 +41,33 @@ for n = 1:max_streak_width
     
     % Compute Laplacian at distance n
     L_n = data_left_n + data_right_n - 2*data;
-    L_mag_n = abs(L_n);
     
     % Combine with previous scales (take maximum magnitude)
-    L_mag_combined = max(L_mag_combined, L_mag_n);
+    if strcmpi(mode, 'valley') || strcmpi(mode, 'plateau')
+        L_combined = max(L_combined, L_n); % for threshold range
+    else
+        L_mag_n = abs(L_n);
+        L_mag_combined = max(L_mag_combined, L_mag_n);
+    end
 end
 
 % Generate threshold list
-min_mag = min(L_mag_combined(:));
-max_mag = prctile(L_mag_combined(:), 99.5);
-lower_list = linspace(min_mag, max_mag, 300);
+if strcmpi(mode, 'valley')
+    L_for_mask = L_combined;
+    min_thr = 0;
+    max_thr = max(L_for_mask(:));
+    lower_list = linspace(min_thr, max_thr, 300);
+elseif strcmpi(mode, 'plateau')
+    L_for_mask = L_combined;
+    min_thr = min(L_for_mask(:));
+    max_thr = 0;
+    lower_list = linspace(min_thr, max_thr, 300);
+else % both
+    L_for_mask = L_mag_combined;
+    min_thr = min(L_for_mask(:));
+    max_thr = prctile(L_for_mask(:), 99.5);
+    lower_list = linspace(min_thr, max_thr, 300);
+end
 var_list = zeros(size(lower_list));
 
 % Initialize corrected_list
@@ -54,8 +75,13 @@ corrected_list = zeros(rows, cols, length(lower_list));
 
 % Process each threshold
 for i = 1:length(lower_list)
-    % Find streaks using combined magnitude
-    streak_mask = L_mag_combined >= lower_list(i);
+    if strcmpi(mode, 'valley')
+        streak_mask = (L_for_mask > lower_list(i));
+    elseif strcmpi(mode, 'plateau')
+        streak_mask = (L_for_mask < lower_list(i));
+    else
+        streak_mask = (L_for_mask >= lower_list(i));
+    end
     [streak_rows, streak_cols] = find(streak_mask);
     
     % Correct streaks
