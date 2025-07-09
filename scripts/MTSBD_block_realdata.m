@@ -30,7 +30,64 @@ figure;
 d3gridDisplay(data_carried,rangetype);
 slice_normalize = input('slice to normalize: ');
 
-%% 2.1 defect masking
+%% 2.1: Remove bragg peaks
+% Normalize background 
+[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+% Bragg remove
+[data_braggremoved]=removeBragg(data_carried);
+data_carried = data_braggremoved;
+
+%% 2.2: crop dataset
+mask= maskSquare(data_carried,0,slice_normalize,'square');
+data_cropped= gridCropMask(data_carried, mask);
+data_carried = data_cropped;
+
+%% 2.3 data selection 
+rangetype='dynamic';
+f1=figure;
+d3gridDisplay(data_carried,rangetype);
+params.slices = input('input a list of slices: ');
+data_selected=data_carried(:,:,params.slices);
+energy_selected = energy_range(params.slices);
+close(f1);
+data_carried = data_selected; 
+
+%% 2.4: MANUAL Local streak removal and interpolation 
+Y_local_removed = zeros(size(data_carried));
+for s = 1:size(data_carried,3)
+    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'plataeu');
+    figure; plot(low_list, var_list);
+    [min_var,min_idx]=min(var_list);
+    min_low = low_list(min_idx);
+
+    [Y_local_removed(:,:,s), ~] = removeLocalStreaks(data_carried, s, min_low, 3,'plataeu');
+
+    %[Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(Y_local_removed(:,:,s), 1, 0.8* min_low);
+end
+data_carried = Y_local_removed;
+
+%% 2.4: AUTO Local Streak Removal (No UI)
+% This block runs streak correction, local streak removal, and interpolation in batch mode.
+
+data_local_removed_auto = zeros(size(data_carried));
+for s = 1:size(data_carried,3)
+    % 1. Find optimal threshold automatically (e.g., by minimizing variance)
+    %[~, var_list, low_list] = streak_correction(data_carried(:,:,s), 3, 'valley');
+    %[~, min_idx] = min(var_list);
+    %min_low = low_list(min_idx);
+
+    % 2. Remove local streaks automatically (no UI)
+    [data_local_removed_auto(:,:,s), ~] = removeLocalStreaks(data_carried, s, 0, 3, 'valley', true);
+
+    % 3. Interpolate local streaks automatically (no UI)
+    %[Y_local_removed_auto(:,:,s), ~] = interpolateLocalStreaks(Y_local_removed_auto(:,:,s), 1, min_low, [], true);
+    
+    % print finished status
+    fprintf('Finished slice %d\n', s);
+end
+data_carried = data_local_removed_auto;
+
+%% 2.5 defect masking
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
@@ -60,14 +117,14 @@ switch method
 end
 data_carried = data_masked;
 
-%% 2.2a: Correct streak
+%% 2.6a: Correct streak
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
 [data_streakremoved, QPI_nostreaks] = RemoveStreaks(data_carried, 'Direction', 'vertical');
 data_carried = data_streakremoved;
 
-%% 2.2b: heal
+%% 2.6b: heal
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
@@ -118,7 +175,7 @@ d3gridDisplay(log(abs(qpiCalculate(data_streakremoved_healed))),rangetype);
 
 data_carried = data_streakremoved_healed;
 
-%% 2.2c: directional_plane (remove slope at one direction, optional)
+%% 2.6c: directional_plane (optional, zero slope at one direction)
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
@@ -126,74 +183,11 @@ real_space_direction = 'vertical';
 [data_plane, mask] = d3plane_directional(data_carried, real_space_direction, 'LineWidth', 5);
 data_carried = data_plane;
 
-%% 2.3: Remove bragg peaks
-% Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
-% Bragg remove
-[data_braggremoved]=removeBragg(data_carried);
-data_carried = data_braggremoved;
-
-%% 2.4 data selection 
-rangetype='dynamic';
-f1=figure;
-d3gridDisplay(data_carried,rangetype);
-params.slices = input('input a list of slices: ');
-data_selected=data_carried(:,:,params.slices);
-energy_selected = energy_range(params.slices);
-close(f1);
-num_slices = size(data_carried,3);
-data_carried = data_selected; 
-
-%% 2.5 Local streak removal and interpolation 
-Y_local_removed = zeros(size(data_carried));
-for s = 1:size(data_carried,3)
-    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'valley');
-    figure; plot(low_list, var_list);
-    [min_var,min_idx]=min(var_list);
-    min_low = low_list(min_idx);
-
-    [corrected_data, ~] = removeLocalStreaks(data_carried, s, min_low, 3,'valley');
-
-    [Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(corrected_data, 1, 0.8* min_low);
-end
-data_carried = Y_local_removed;
-
-%% 2.5_auto: Automated Local Streak Removal and Interpolation (No UI)
-% This block runs streak correction, local streak removal, and interpolation in batch mode.
-
-Y_local_removed_auto = zeros(size(data_carried));
-for s = 1:size(data_carried,3)
-    % 1. Find optimal threshold automatically (e.g., by minimizing variance)
-    [~, var_list, low_list] = streak_correction(data_carried(:,:,s), 3, 'valley');
-    [~, min_idx] = min(var_list);
-    min_low = low_list(min_idx);
-
-    % 2. Remove local streaks automatically (no UI)
-    [corrected_data, ~] = removeLocalStreaks(data_carried, s, min_low, 3, 'valley', true);
-
-    % 3. Interpolate local streaks automatically (no UI)
-    [Y_local_removed_auto(:,:,s), ~] = interpolateLocalStreaks(corrected_data, 1, min_low, [], true);
-    
-    % print finished status
-    fprintf('Finished slice %d\n', s);
-end
-data_carried = Y_local_removed_auto;
-
-%% 2.6: crop dataset
-mask= maskSquare(data_carried,0,slice_normalize,'square');
-data_cropped= gridCropMask(data_carried, mask);
-data_carried = data_cropped;
-
-%% 2.51 Gaussian smoothing in spatial domain 
-[data_carried] = smoothdata(data_carried, 2);
-
-
-
 %% 2.end: Normalize background 
 [Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
 
 %% 3. Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('ZrSiTe_positivebias_preprocessed.mat', 'Y', 'data_masked', 'data_cropped', 'data_braggremoved', "Y_local_removed_auto",'data_original', "energy_range",'energy_selected','defect_loc')
+save('ZrSiTe_preprocessed0709_FULL.mat', 'Y', 'data_cropped','data_nostreaks','data_masked',"energy_range",'defect_loc')
 
 %% 4_pre Pick reference slice and Initialize reference kernels
 f2=figure;
@@ -347,7 +341,7 @@ end
 miniloop_iteration = 1;
 outerloop_maxIT= 5;
 
-params_ref.lambda1 = [0.03, 0.03, 0.03,0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.05, 0.02, 0.02,0.03];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.5 * kernel_sizes);
@@ -646,7 +640,7 @@ end
 miniloop_iteration = 1;
 outerloop_maxIT= 8;
 
-params.lambda1 = [0.03, 0.03, 0.03];  % regularization parameter for Phase I
+params.lambda1 = [0.05, 0.03, 0.03];  % regularization parameter for Phase I
 %params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params.phase2 = false;
 params.kplus = ceil(0.5 * kernel_sizes);
@@ -685,7 +679,6 @@ else
         Y_used, kernel_sizes, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
 end
 
-%% Save results
 save('ZrSiTe_slices.mat', 'Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras');
 
 %% convert Aout_ALL to cell format

@@ -34,6 +34,7 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_sizes, kerneltype, windo
             fig = figure;
             imagesc(Y);
             colorbar;
+            colormap("gray");
             axis square;
             title('Select initial kernel regions (Center dot indicates kernel center)');
             hold on;
