@@ -251,3 +251,320 @@ params_ref.noise_var = eta_data;
 
 %% Visualize Padded result 
 visualizeRealResult(Y_ref,A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad);
+
+%% Block 3: Find Most Isolated Points and Initialize Kernels
+num_slices = size(Y,3);
+
+% Choose method for kernel center selection
+fprintf('Choose method for kernel center selection:\n');
+fprintf('1. Find most isolated points automatically\n');
+fprintf('2. Manually select 3 kernel centers\n');
+choice = input('Enter choice (1 or 2): ');
+
+if choice == 1
+    fprintf('Calculating isolation scores and finding most isolated points...\n');
+    
+    % Choose target kernel sizes first
+    type = 'kernel_sizes_all';
+    if strcmp(type, 'ref_kernel_sizes')
+        target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
+    elseif strcmp(type, 'kernel_sizes_cap')
+        target_kernel_sizes = squeeze(max(kernel_sizes,[],1));
+    elseif strcmp(type, 'kernel_sizes_all')
+        target_kernel_sizes = kernel_sizes;
+    end
+
+    % Get defect positions from X_ref
+    most_isolated_points = cell(1, num_kernels);
+    isolation_scores = cell(1, num_kernels);
+    defect_positions = cell(1, num_kernels);
+    num_defects = zeros(1, num_kernels);
+
+    % Create figure for activation value distributions
+    figure('Name', 'Activation Value Distributions');
+    for k = 1:num_kernels
+        % Plot histogram of activation values
+        subplot(2, num_kernels, k);
+        activation_values = X_ref(:,:,k);
+        h = histogram(activation_values(activation_values > 0), 50);
+        set(gca, 'YScale', 'log');
+        title(sprintf('Kernel %d Activation Distribution', k));
+        xlabel('Activation Value');
+        ylabel('Frequency (log scale)');
+        
+        % Add vertical line for threshold
+        %threshold = max(X_ref(:,:,k),[],'all')/10;
+        threshold = 0;
+        hold on;
+        xline(threshold, 'r--', 'Threshold');
+        hold off;
+        
+        % Plot cumulative distribution
+        subplot(2, num_kernels, k + num_kernels);
+        [counts, edges] = histcounts(activation_values(activation_values > 0), 50, 'Normalization', 'cdf');
+        stairs(edges(1:end-1), counts);
+        title(sprintf('Kernel %d Cumulative Distribution', k));
+        xlabel('Activation Value');
+        ylabel('Cumulative Frequency');
+        hold on;
+        xline(threshold, 'r--', 'Threshold');
+        hold off;
+        
+        % Get positions of defects above threshold
+        [rows, cols] = find(X_ref(:,:,k) > threshold);
+        defect_positions{k} = [rows, cols];
+        num_defects(k) = size(defect_positions{k}, 1);
+        fprintf('Kernel %d has %d defects above threshold %.4f\n', k, num_defects(k), threshold);
+    end
+
+    % Calculate isolation scores for each kernel
+    for k = 1:num_kernels
+        if num_defects(k) == 0
+            warning('No defects found for kernel %d', k);
+            continue;
+        end
+        
+        % Create summed activation map of all other kernels
+        X_others = zeros(size(X_ref(:,:,1)));
+        for l = 1:num_kernels
+            if l ~= k
+                X_others = X_others + X_ref(:,:,l);
+            end
+        end
+        
+        % Get positions of defects in other kernels
+        [other_rows, other_cols] = find(X_others > max(X_others,[],'all')/10);
+        other_positions = [other_rows, other_cols];
+        
+        % Use target kernel size for boundary check
+        half_kernel_size = floor(target_kernel_sizes(k,:)/2);
+        
+        % First filter out points too close to boundaries
+        valid_points = true(num_defects(k), 1);
+        for i = 1:num_defects(k)
+            y = defect_positions{k}(i,1);
+            x = defect_positions{k}(i,2);
+            
+            if y <= half_kernel_size(1) || y >= size(X_ref,1) - half_kernel_size(1) || ...
+               x <= half_kernel_size(2) || x >= size(X_ref,2) - half_kernel_size(2)
+                valid_points(i) = false;
+            end
+        end
+        
+        % Only proceed with valid points
+        valid_defects = defect_positions{k}(valid_points,:);
+        if isempty(valid_defects)
+            error('No valid isolated points found for kernel %d - all points are too close to image boundaries', k);
+        end
+        
+        % Calculate isolation scores only for valid points
+        S_k = zeros(size(valid_defects, 1), 1);
+        for i = 1:size(valid_defects, 1)
+            diffs = other_positions - valid_defects(i,:);
+            distances = sum(diffs.^2, 2);
+            S_k(i) = min(distances);
+        end
+        
+        % Find the most isolated point among valid points
+        [max_score, max_idx] = max(S_k);
+        valid_indices = find(valid_points);
+        max_idx = valid_indices(max_idx);
+        
+        most_isolated_points{k} = defect_positions{k}(max_idx,:);
+        isolation_scores{k} = S_k;
+        
+        fprintf('Kernel %d: Most isolated point at (%d,%d) with score %.2f\n', ...
+            k, most_isolated_points{k}(1), most_isolated_points{k}(2), max_score);
+    end
+
+    % Visualize the results
+    figure('Name', 'Isolation Analysis');
+    for k = 1:num_kernels
+        subplot(2, num_kernels, k);
+        imagesc(X_ref(:,:,k));
+        hold on;
+        scatter(defect_positions{k}(:,2), defect_positions{k}(:,1), 50, 'w', 'o');
+        if ~isempty(most_isolated_points{k})
+            scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
+        end
+        title(sprintf('Kernel %d', k));
+        colorbar;
+        axis square;
+        hold off;
+        
+        subplot(2, num_kernels, k + num_kernels);
+        X_others = zeros(size(X_ref(:,:,1)));
+        for l = 1:num_kernels
+            if l ~= k
+                X_others = X_others + X_ref(:,:,l);
+            end
+        end
+        imagesc(X_others);
+        hold on;
+        if ~isempty(most_isolated_points{k})
+            scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
+        end
+        title(sprintf('Other Kernels (not %d)', k));
+        colorbar;
+        axis square;
+        hold off;
+    end
+
+    % Store isolation analysis results
+    isolation_analysis = struct();
+    isolation_analysis.defect_positions = defect_positions;
+    isolation_analysis.most_isolated_points = most_isolated_points;
+    isolation_analysis.isolation_scores = isolation_scores;
+    isolation_analysis.num_defects = num_defects;
+
+    % Display most isolated points
+    figure;
+    imagesc(Y_ref);
+    hold on;
+    for k = 1:num_kernels
+        scatter(most_isolated_points{k}(2), most_isolated_points{k}(1), 100, 'r', '*');
+    end
+
+    % Convert most_isolated_points to matrix format
+    kernel_centers = zeros(num_kernels, 2);
+    for k = 1:num_kernels
+        if ~isempty(most_isolated_points{k})
+            kernel_centers(k,:) = most_isolated_points{k};
+        else
+            error('No isolated point found for kernel %d', k);
+        end
+    end
+
+elseif choice == 2
+    fprintf('Manual kernel center selection mode...\n');
+    
+    % Display the reference image for manual selection
+    figure('Name', 'Manual Kernel Center Selection');
+    imagesc(Y_ref);
+    title('Click on 3 points to select kernel centers. Press Enter when done.');
+    colormap(gray);
+    colorbar;
+    
+    % Get user clicks for kernel centers
+    kernel_centers = zeros(num_kernels, 2);
+    for k = 1:num_kernels
+        fprintf('Click on center for kernel %d/%d\n', k, num_kernels);
+        [x, y] = ginput(1);
+        kernel_centers(k,:) = [round(y), round(x)]; % Convert to [row, col] format
+        
+        % Mark the selected point
+        hold on;
+        scatter(x, y, 100, 'r', '*');
+        text(x+5, y+5, sprintf('K%d', k), 'Color', 'red', 'FontSize', 12, 'FontWeight', 'bold');
+        hold off;
+    end
+    
+    fprintf('Kernel centers selected:\n');
+    for k = 1:num_kernels
+        fprintf('Kernel %d: (%d, %d)\n', k, kernel_centers(k,1), kernel_centers(k,2));
+    end
+    
+    % Use target kernel sizes from the reference slice
+    target_kernel_sizes = kernel_sizes;
+    
+else
+    error('Invalid choice. Please enter 1 or 2.');
+end
+
+% Initialize kernels for all slices
+A1_all = cell(num_slices, num_kernels);
+matrix = true;  % Use matrix form for A1
+change_size = false;
+
+for s = 1:num_slices
+    fprintf('Initializing kernels for slice %d/%d...\n', s, num_slices);
+    if matrix
+        A1_all(s,:) = initialize_kernels_proliferation(Y(:,:,s), num_kernels, kernel_centers, window_type, target_kernel_sizes, 'interactive', change_size);
+    else 
+        A1_all(s,:) = initialize_kernels_proliferation(Y(:,:,s), num_kernels, kernel_centers, window_type, squeeze(kernel_sizes(s,:,:)), 'interactive', change_size);
+    end
+end
+
+% Visualize initialized kernels for reference slice
+figure('Name', 'Initialized Kernels (Reference Slice)');
+for k = 1:num_kernels
+    subplot(1,num_kernels,k);
+    imagesc(A1_all{params.ref_slice,k});
+    colormap(gray);
+    colorbar;
+    title(sprintf('Initialized Kernel %d', k));
+    axis square;
+end
+
+% Store initialization results
+init_results = struct();
+init_results.A = A1_all;
+init_results.kernel_centers = kernel_centers;
+init_results.kernel_sizes = target_kernel_sizes;
+
+fprintf('Kernel initialization complete for all slices.\n');
+
+%% Convert A1_all to matrix form and prepare noise
+A1_all_matrix = cell(num_kernels,1);
+for k = 1:num_kernels
+    A1_all_matrix{k} = zeros(size(A1_all{1,k},1),size(A1_all{1,k},2),num_slices);
+    for s = 1:num_slices
+        A1_all_matrix{k}(:,:,s) = A1_all{s,k};
+    end
+end
+
+eta_data3d = estimate_noise3D(Y, 'std');  
+
+%% initialize xinit for all slices with reference slice
+for k = 1:num_kernels
+    params.xinit{k}.X = X_ref(:,:,k);
+    b_temp = extras_ref.phase1.biter(k); 
+    params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
+end
+
+
+%% Run for all_slice
+% SBD settings.
+miniloop_iteration = 1;
+outerloop_maxIT= 8;
+
+params.lambda1 = [0.05, 0.03, 0.03];  % regularization parameter for Phase I
+%params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
+params.phase2 = false;
+params.kplus = ceil(0.5 * kernel_sizes);
+params.lambda2 = [2e-2, 2e-2];  % FINAL reg. param. value for Phase II
+params.nrefine = 3;
+params.signflip = 0.2;
+params.xpos = true;
+params.getbias = true;
+params.Xsolve = 'FISTA';
+params.use_Xregulated = false;
+params.noise_var = eta_data3d;
+
+kernel_sizes_single = squeeze(max(kernel_sizes,[],1));
+Y_used = Y;
+A1_used = A1_all_matrix;
+
+% Set up display functions
+figure;
+dispfun = cell(1, num_kernels);
+for n = 1:num_kernels
+    dispfun{n} = @(Y, A, X, kernel_sizes_sing, kplus) showims(Y_used, A1_used{n}, X_ref(:,:,n), A, X, kernel_sizes_single, kplus, 1);
+end
+
+% Update params for MTSBD
+for k = 1:num_kernels
+    params.xinit{k}.X = X_ref(:,:,k);
+    b_temp = extras_ref.phase1.biter(k); 
+    params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
+end
+
+if params.use_Xregulated
+    [REG_Aout_ALL, REG_Xout_ALL, REG_bout_ALL, REG_extras_ALL] = MTSBD_Xregulated_all_slices(...
+        Y_used, kernel_sizes, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
+else
+    [Aout_ALL, Xout_ALL, bout_ALL, ALL_extras] = MTSBD_all_slice(...
+        Y_used, kernel_sizes, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
+end
+%%
+save('Ag111_slices.mat', 'Y', 'A1_all_matrix','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras');

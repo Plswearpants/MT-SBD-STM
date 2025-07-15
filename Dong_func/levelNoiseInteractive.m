@@ -1,4 +1,4 @@
-function [adjusted_data, noise_increase_std, comment] = levelNoiseInteractive(data, dimension)
+function [adjusted_data, noise_increase_std, noise_std, comment] = levelNoiseInteractive(data, dimension)
 % Levels noise across a specified dimension in a 2D dataset by increasing the noise variance.
 %   This function allows the user to interactively select a region containing 
 %   noise in a 2D dataset, then levels the noise across the specified dimension.

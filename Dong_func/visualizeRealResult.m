@@ -1,4 +1,4 @@
-function visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
+function Y_rec= visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     % Visualize results from SBD-STM reconstruction for real data
     %
     % Inputs:

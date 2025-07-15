@@ -55,12 +55,12 @@ data_carried = data_selected;
 %% 2.4: MANUAL Local streak removal and interpolation 
 Y_local_removed = zeros(size(data_carried));
 for s = 1:size(data_carried,3)
-    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'plataeu');
+    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'valley');
     figure; plot(low_list, var_list);
     [min_var,min_idx]=min(var_list);
     min_low = low_list(min_idx);
 
-    [Y_local_removed(:,:,s), ~] = removeLocalStreaks(data_carried, s, min_low, 3,'plataeu');
+    [Y_local_removed(:,:,s), ~] = removeLocalStreaks(data_carried, s, min_low, 3,'valley');
 
     %[Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(Y_local_removed(:,:,s), 1, 0.8* min_low);
 end
@@ -189,6 +189,9 @@ data_carried = data_plane;
 %% 3. Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 save('ZrSiTe_preprocessed0709_FULL.mat', 'Y', 'data_cropped','data_nostreaks','data_masked',"energy_range",'defect_loc')
 
+
+%% Before Run Standardize
+rangetype ='dynamic';
 %% 4_pre Pick reference slice and Initialize reference kernels
 f2=figure;
 d3gridDisplay(Y,rangetype);
@@ -221,7 +224,7 @@ axis square;
 % draw square on the data to include as many visible ripples of the scattering as possible 
 same_size = 1;
 kerneltype = 'selected';
-window_type = {'gaussian', 5};
+window_type = {'gaussian', 2.5};
 %window_type = '';
 
 
@@ -244,6 +247,14 @@ else
     end
 end
 
+figure;
+for k = 1:num_kernels
+    subplot(1,num_kernels,k);
+    imagesc(A1_ref{k});
+    colorbar;
+    axis square;
+end
+
 %% (ESS)noise level determination 
 eta_data = estimate_noise(Y_ref, 'std');  
 
@@ -261,9 +272,9 @@ end
 
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 10;
+outerloop_maxIT= 6;
 %params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.03, 0.03,0.03, 0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.05, 0.05, 0.05, 0.05];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.2 * kernel_sizes);
@@ -282,7 +293,7 @@ params_ref.noise_var = eta_data;
 [A_ref, X_ref, b_ref, extras_ref] = MT_SBD(Y_ref, kernel_sizes, params_ref, dispfun, A1_ref, miniloop_iteration, outerloop_maxIT);
 
 %% Visualize Reference result 
-visualizeRealResult(Y_ref,A_ref, X_ref, b_ref, extras_ref);
+Y_rec = visualizeRealResult(Y_ref,A_ref, X_ref, b_ref, extras_ref);
 
 %% compare the Xout vs X manual
 X0=zeros([size(Y_ref,1),size(Y_ref,2),length(defect_loc)]);
@@ -638,9 +649,9 @@ end
 %% Run for all_slice
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 8;
+outerloop_maxIT= 6;
 
-params.lambda1 = [0.05, 0.03, 0.03];  % regularization parameter for Phase I
+params.lambda1 = [0.20, 0.20, 0.20, 0.20];  % regularization parameter for Phase I
 %params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params.phase2 = false;
 params.kplus = ceil(0.5 * kernel_sizes);
@@ -678,8 +689,10 @@ else
     [Aout_ALL, Xout_ALL, bout_ALL, ALL_extras] = MTSBD_all_slice(...
         Y_used, kernel_sizes, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
 end
-
-save('ZrSiTe_slices.mat', 'Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras');
+%%
+eta3dall = permute(repmat(eta_data3d,[6,1]),[2,1]);
+observation_fidelity = eta3dall./squeeze(var(ALL_extras.phase1.residuals, 0, [1,2]));
+save('ZrSiTe_slices[160,792]meV_[80,80]_good.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras', 'eta_data3d','observation_fidelity');
 
 %% convert Aout_ALL to cell format
 Aout_ALL_cell = cell(num_slices, num_kernels);
@@ -690,18 +703,45 @@ for s = 1:num_slices
 end
 
 %% Visualize Reference result 
-for i = 1: size(A1_all,1)
+for i = 40: 41
     pp=struct();
     pp.phase1.residuals = ALL_extras.phase1.residuals(:,:,i,:);
     pp.phase1.quality_metrics = ALL_extras.phase1.quality_metrics;
     visualizeRealResult(Y_used(:,:,i), Aout_ALL_cell(i,:), Xout_ALL, bout_ALL(i,:), pp);
 end 
 %% Kernels movies 
+
 for k = 1:length(Aout_ALL)
     figure;
     d3gridDisplay(Aout_ALL{k}, 'dynamic')
 end
 
+%% 
+Aout_show = [Aout_ALL{1},Aout_ALL{2},Aout_ALL{3},Aout_ALL{4}];
+Aout_show_norm = normalize(Aout_show,3);
+figure;
+d3gridDisplay(Aout_show, 'dynamic')
+%%
+qpi_show = [qpiCalculate(Aout_ALL{1}),qpiCalculate(Aout_ALL{2}),qpiCalculate(Aout_ALL{3}),qpiCalculate(Aout_ALL{4})];
+figure;
+d3gridDisplay(qpi_show, 'dynamic')
+
+%%
+Aout_show_norm = Aout_show;
+qpi_show_norm = qpi_show;
+for i = 1: 80
+    Aout_show_norm(:,:,i) = mat2gray(Aout_show(:,:,i));
+    qpi_show_norm(:,:,i) = abs(mat2gray(qpi_show(:,:,i),[0.1,1])-1);
+end
+ALL_show_norm = [Aout_show_norm;qpi_show_norm];
+figure; 
+d3gridDisplay(ALL_show_norm, 'dynamic');
+
+%% QPI movies 
+for k = 1:length(Aout_ALL)
+    figure;
+    d3gridDisplay(qpiCalculate(Aout_ALL{k}), 'dynamic')
+end
 %% Pad the output kernels to target sizes
 target_size = [110, 110];  % Same target size as used for reference kernels
 kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
@@ -805,4 +845,259 @@ for i = 1: size(A1_all,1)
     pp.phase1.residuals = ALL_extras.phase1.residuals(:,:,i,:);
     pp.phase1.quality_metrics = ALL_extras.phase1.quality_metrics;
     visualizeRealResult(Y_used(:,:,i), Aout_ALL_cell(i,:), Xout_ALL, bout_ALL(i,:), pp);
-end 
+end
+
+%% Block 5: Sequential Processing with MT_SBD.m
+% This block processes each slice individually using MT_SBD.m sequentially
+fprintf('\n=== SEQUENTIAL PROCESSING BLOCK ===\n');
+fprintf('Processing each slice individually with MT_SBD.m\n');
+
+% Initialize storage for sequential results
+Aout_seq = cell(num_slices, num_kernels);
+Xout_seq = cell(num_slices, num_kernels);
+bout_seq = zeros(num_slices, num_kernels);
+extras_seq = cell(num_slices, 1);
+
+% Estimate noise for all slices using estimate_noise3D (ROI defined once)
+eta_data3d_seq = estimate_noise3D(Y, 'std');
+fprintf('Noise estimation completed for all slices. ROI defined once.\n');
+
+% Set up display functions (same as Block 4)
+figure;
+dispfun_seq = cell(1, num_kernels);
+
+% SBD settings (same as Block 4)
+miniloop_iteration_seq = 1;
+outerloop_maxIT_seq = 8;
+
+% Process each slice sequentially
+for s = 1:num_slices
+    fprintf('\n--- Processing Slice %d/%d ---\n', s, num_slices);
+    slice_starttime = tic;
+
+    for n = 1:num_kernels
+        dispfun_seq{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y, A1_all{s,n}, X, A, X, kernel_sizes, kplus, 1);
+    end
+    % Extract current slice
+    Y_slice = Y(:,:,s);
+    
+    % Initialize kernels for this slice (same as Block 4)
+    A1_slice = cell(1, num_kernels);
+    for k = 1:num_kernels
+        A1_slice{k} = A1_all{s,k};
+    end
+    
+    % Set up parameters for this slice (same structure as Block 4)
+    params_seq = struct();
+    params_seq.lambda1 = [0.1, 0.2, 0.03, 0.03];  % Same as Block 4
+    params_seq.phase2 = false;
+    params_seq.kplus = ceil(0.2 * kernel_sizes);  % Same as Block 4
+    params_seq.lambda2 = [0.05, 0.05, 0.05, 0.15];  % Same as Block 4
+    params_seq.nrefine = 4;
+    params_seq.signflip = 0.2;
+    params_seq.xpos = true;
+    params_seq.getbias = true;
+    params_seq.Xsolve = 'FISTA';
+    params_seq.noise_var = eta_data3d_seq(s);
+    
+    % Initialize xinit for this slice using reference results (same as Block 4)
+    params_seq.xinit = cell(1, num_kernels);
+    for k = 1:num_kernels
+        params_seq.xinit{k}.X = X_ref(:,:,k);
+        params_seq.xinit{k}.b = extras_ref.phase1.biter(k);
+    end
+    
+    % Run MT_SBD for this slice (same as Block 4)
+    try
+        [Aout_slice, Xout_slice, bout_slice, extras_slice] = MT_SBD(...
+            Y_slice, kernel_sizes, params_seq, dispfun_seq, A1_slice, ...
+            miniloop_iteration_seq, outerloop_maxIT_seq);
+        
+        % Store results for this slice
+        for k = 1:num_kernels
+            Aout_seq{s,k} = Aout_slice{k};
+            Xout_seq{s,k} = Xout_slice(:,:,k);
+        end
+        bout_seq(s,:) = bout_slice;
+        extras_seq{s} = extras_slice;
+        
+        slice_runtime = toc(slice_starttime);
+        fprintf('Slice %d completed in %.2fs\n', s, slice_runtime);
+        
+        % Save individual slice results immediately
+        energy_val = energy_selected(s);
+        % Format energy value for filename (convert to meV and handle negative values)
+        energy_meV = energy_val * 1000;  % Convert to meV
+        if energy_meV >= 0
+            slice_filename = sprintf('LiFeAs_sequential_%+.1f_meV.mat', energy_meV);
+        else
+            slice_filename = sprintf('LiFeAs_sequential_%.1f_meV.mat', energy_meV);
+        end
+        slice_data = struct();
+        slice_data.Aout = Aout_slice;
+        slice_data.Xout = Xout_slice;
+        slice_data.bout = bout_slice;
+        slice_data.extras = extras_slice;
+        slice_data.Y_slice = Y_slice;
+        slice_data.slice_number = s;
+        slice_data.energy = energy_val;
+        slice_data.runtime = slice_runtime;
+        slice_data.params = params_seq;
+        
+        save(slice_filename, '-struct', 'slice_data');
+        fprintf('Saved individual results for slice %d (%.1f meV) to %s\n', s, energy_meV, slice_filename);
+        
+        % Optional: Visualize results for this slice
+        if mod(s, 5) == 0 || s == num_slices  % Visualize every 5th slice and the last one
+            fprintf('Visualizing results for slice %d...\n', s);
+            visualizeRealResult(Y_slice, Aout_slice, Xout_slice, bout_slice, extras_slice);
+        end
+        
+    catch ME
+        fprintf('Error processing slice %d: %s\n', s, ME.message);
+        % Save partial results even if there was an error
+        if exist('Aout_slice', 'var') && exist('Xout_slice', 'var')
+            energy_val = energy_selected(s);
+            energy_meV = energy_val * 1000;  % Convert to meV
+            if energy_meV >= 0
+                slice_filename = sprintf('LiFeAs_sequential_%+.1f_meV_ERROR.mat', energy_meV);
+            else
+                slice_filename = sprintf('LiFeAs_sequential_%.1f_meV_ERROR.mat', energy_meV);
+            end
+            slice_data = struct();
+            slice_data.Aout = Aout_slice;
+            slice_data.Xout = Xout_slice;
+            slice_data.bout = bout_slice;
+            slice_data.extras = extras_slice;
+            slice_data.Y_slice = Y_slice;
+            slice_data.slice_number = s;
+            slice_data.energy = energy_val;
+            slice_data.error_message = ME.message;
+            slice_data.params = params_seq;
+            
+            save(slice_filename, '-struct', 'slice_data');
+            fprintf('Saved partial results for slice %d (%.1f meV, with error) to %s\n', s, energy_meV, slice_filename);
+        end
+        % Continue with next slice
+        continue;
+    end
+end
+
+% Save sequential results
+save('ZrSiTe_sequential.mat', 'Aout_seq', 'Xout_seq', 'bout_seq', 'extras_seq', 'energy_selected');
+
+% Convert sequential results to matrix format for comparison
+Aout_seq_matrix = cell(num_kernels, 1);
+for k = 1:num_kernels
+    Aout_seq_matrix{k} = zeros(size(Aout_seq{1,k},1), size(Aout_seq{1,k},2), num_slices);
+    for s = 1:num_slices
+        if ~isempty(Aout_seq{s,k})
+            Aout_seq_matrix{k}(:,:,s) = Aout_seq{s,k};
+        end
+    end
+end
+
+% Create kernel movies for sequential results
+fprintf('\nCreating kernel movies for sequential results...\n');
+for k = 1:num_kernels
+    figure;
+    d3gridDisplay(Aout_seq_matrix{k}, 'dynamic');
+    title(sprintf('Sequential Kernel %d', k));
+end
+
+fprintf('\nSequential processing complete!\n');
+
+%% Visualize sequential results
+fprintf('\n=== VISUALIZING SEQUENTIAL RESULTS ===\n');
+
+% Convert sequential results to matrix format for visualization
+Aout_seq_matrix = cell(num_kernels, 1);
+for k = 1:num_kernels
+    Aout_seq_matrix{k} = zeros(size(Aout_seq{1,k},1), size(Aout_seq{1,k},2), num_slices);
+    for s = 1:num_slices
+        if ~isempty(Aout_seq{s,k})
+            Aout_seq_matrix{k}(:,:,s) = Aout_seq{s,k};
+        end
+    end
+end
+
+% Calculate Y_reconstructed for each slice
+Y_reconstructed = zeros(size(Y));
+for s = 1:num_slices
+    Y_slice_recon = zeros(size(Y,1), size(Y,2));
+    for k = 1:num_kernels
+        if ~isempty(Aout_seq{s,k}) && ~isempty(Xout_seq{s,k})
+            Y_slice_recon = Y_slice_recon + convfft2(Aout_seq{s,k}, Xout_seq{s,k});
+        end
+    end
+    Y_reconstructed(:,:,s) = Y_slice_recon;
+end
+
+% 1. Visualize optimized kernels (A_out) using d3gridDisplay
+fprintf('Displaying optimized kernels (A_out) for each kernel type...\n');
+for k = 1:num_kernels
+    figure('Name', sprintf('Sequential Kernel %d (A_out)', k));
+    d3gridDisplay(Aout_seq_matrix{k}, 'dynamic');
+    title(sprintf('Sequential Processing - Kernel %d Evolution Across Slices', k));
+    xlabel('X'); ylabel('Y'); zlabel('Slice/Energy');
+end
+
+% 2. Visualize reconstructed data (Y_reconstructed) using d3gridDisplay
+fprintf('Displaying reconstructed data (Y_reconstructed)...\n');
+figure('Name', 'Sequential Y_reconstructed');
+d3gridDisplay(Y_reconstructed, 'dynamic');
+title('Sequential Processing - Reconstructed Data Across Slices');
+xlabel('X'); ylabel('Y'); zlabel('Slice/Energy');
+
+% 3. Visualize original data for comparison
+fprintf('Displaying original data for comparison...\n');
+figure('Name', 'Original Data');
+d3gridDisplay(Y, 'dynamic');
+title('Original Data Across Slices');
+xlabel('X'); ylabel('Y'); zlabel('Slice/Energy');
+
+% 4. Visualize residual (difference between original and reconstructed)
+fprintf('Displaying residual (Original - Reconstructed)...\n');
+Y_residual = Y - Y_reconstructed;
+figure('Name', 'Sequential Residual');
+d3gridDisplay(Y_residual, 'dynamic');
+title('Sequential Processing - Residual (Original - Reconstructed)');
+xlabel('X'); ylabel('Y'); zlabel('Slice/Energy');
+
+% 5. Calculate and display quality metrics
+fprintf('Calculating quality metrics...\n');
+residual_norm = zeros(num_slices, 1);
+reconstruction_quality = zeros(num_slices, 1);
+
+for s = 1:num_slices
+    % Calculate residual norm for each slice
+    residual_norm(s) = norm(Y_residual(:,:,s), 'fro') / norm(Y(:,:,s), 'fro');
+    
+    % Calculate reconstruction quality (1 - normalized residual)
+    reconstruction_quality(s) = 1 - residual_norm(s);
+end
+
+% Plot quality metrics
+figure('Name', 'Sequential Processing Quality Metrics');
+subplot(2,1,1);
+plot(energy_selected * 1000, residual_norm, 'b-o', 'LineWidth', 2);
+title('Residual Norm vs Energy');
+xlabel('Energy (meV)');
+ylabel('Normalized Residual Norm');
+grid on;
+
+subplot(2,1,2);
+plot(energy_selected * 1000, reconstruction_quality, 'r-o', 'LineWidth', 2);
+title('Reconstruction Quality vs Energy');
+xlabel('Energy (meV)');
+ylabel('Reconstruction Quality');
+grid on;
+
+% Print summary statistics
+fprintf('\n=== SEQUENTIAL PROCESSING QUALITY SUMMARY ===\n');
+fprintf('Average Residual Norm: %.4f\n', mean(residual_norm));
+fprintf('Average Reconstruction Quality: %.4f\n', mean(reconstruction_quality));
+fprintf('Best Reconstruction Quality: %.4f (at %.1f meV)\n', max(reconstruction_quality), energy_selected(reconstruction_quality == max(reconstruction_quality)) * 1000);
+fprintf('Worst Reconstruction Quality: %.4f (at %.1f meV)\n', min(reconstruction_quality), energy_selected(reconstruction_quality == min(reconstruction_quality)) * 1000);
+
+fprintf('\nSequential results visualization complete!\n');
