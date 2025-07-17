@@ -28,6 +28,7 @@ function visualize_heatspace_details_properGen(dataset_metrics)
     Y = dataset_metrics.Y{snr_idx, theta_idx, nobs_idx};
     Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, nobs_idx};
     A0 = dataset_metrics.A0{snr_idx, theta_idx, nobs_idx};
+    A0_noiseless = dataset_metrics.A0_noiseless{snr_idx, theta_idx, nobs_idx};
     X0 = dataset_metrics.X0{snr_idx, theta_idx, nobs_idx};
     Aout = dataset_metrics.Aout{snr_idx, theta_idx, nobs_idx};
     Xout = dataset_metrics.Xout{snr_idx, theta_idx, nobs_idx};
@@ -46,7 +47,7 @@ function visualize_heatspace_details_properGen(dataset_metrics)
     extras.demixing_matrix = overlap_matrix;
 
     % Call visualizeResults
-    visualizeResults(Y, A0, Aout, X0, Xout, bout, extras);
+    visualizeResults(Y, A0_noiseless, Aout, X0, Xout, bout, extras);
     
     % Print performance metrics
     fprintf('\nPerformance Metrics:\n');

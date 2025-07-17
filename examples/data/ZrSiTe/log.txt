@@ -3,5 +3,15 @@
 0708_2: Origin-> Bragg -> Crop -> Data Selection(110:200) -> Automated Local Streak Removal -> Masked(one defects)-> Full streak removal -> Heal -> normalize to Y
 
 0709_FULL: Origin-> Bragg -> Crop -> Data Selection(110:200) -> Automated Local Streak Removal      |
-                               -> Data Selection(1:24)-> Automated Local Streak Removal(min_val=0)  | Combine -> Masked(one defects)-> Full streak removal -> Heal -> normalize to Y
+                               -> Data Selection(1:24)-> Automated Local Streak Removal(min_val=0)  | Combine -> Masked(two defects)-> Full streak removal -> Heal -> normalize to Y
                                -> Data Selection(25:109)-> Full streak removal                      | 
+
+0717_FULL: Origin-> Bragg -> Crop -> Automated Local Streak Removal(50:200, 'valley', 1.7min_val,1.5min_val) 
+                                  -> Automated Local Streak Removal(1:25, 'plateau', min_val,min_val) 
+                                  -> Masked(three defects, radius(5.5, 10, 5))-> 
+                                  -> Bragg -> Full streak removal -> Heal -> normalize to Y
+
+0717_FULL2: Origin-> Bragg -> Crop -> Automated Local Streak Removal(50:200, 'valley', min_val,min_val) 
+                                  -> Automated Local Streak Removal(1:25, 'plateau', min_val,min_val) 
+                                  -> Masked(three defects, radius(5.5, 10, 5))-> 
+                                  -> Bragg -> Full streak removal -> Heal -> normalize to Y                               

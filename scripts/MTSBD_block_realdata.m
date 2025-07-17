@@ -24,21 +24,23 @@ data_original = dIdV;
 num_slices = size(data_original,3);
 spatial = size(data_original,1);
 %% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Block 2: Data preprocessing
+% initialize the preprocessing parameters
+preprocessing_params = struct();
 data_carried = data_original;
 rangetype='dynamic';
 figure;
 d3gridDisplay(data_carried,rangetype);
-slice_normalize = input('slice to normalize: ');
+preprocessing_params.slice_normalize = input('slice to normalize: ');
 
 %% 2.1: Remove bragg peaks
 % Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 % Bragg remove
 [data_braggremoved]=removeBragg(data_carried);
 data_carried = data_braggremoved;
 
 %% 2.2: crop dataset
-mask= maskSquare(data_carried,0,slice_normalize,'square');
+mask= maskSquare(data_carried,0,preprocessing_params.slice_normalize,'square');
 data_cropped= gridCropMask(data_carried, mask);
 data_carried = data_cropped;
 
@@ -46,72 +48,98 @@ data_carried = data_cropped;
 rangetype='dynamic';
 f1=figure;
 d3gridDisplay(data_carried,rangetype);
-params.slices = input('input a list of slices: ');
-data_selected=data_carried(:,:,params.slices);
-energy_selected = energy_range(params.slices);
+preprocessing_params.slices = input('input a list of slices: ');
+data_selected=data_carried(:,:,preprocessing_params.slices);
+energy_selected = energy_range(preprocessing_params.slices);
 close(f1);
 data_carried = data_selected; 
 
 %% 2.4: MANUAL Local streak removal and interpolation 
+preprocessing_params.manualStreakRemoval_slices = 1:size(data_carried,3);
+factor = 2;
+preprocessing_params.manualStreakRemoval_factor = factor;
 Y_local_removed = zeros(size(data_carried));
-for s = 1:size(data_carried,3)
+for s = preprocessing_params.manualStreakRemoval_slices
     [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'valley');
     figure; plot(low_list, var_list);
     [min_var,min_idx]=min(var_list);
     min_low = low_list(min_idx);
 
-    [Y_local_removed(:,:,s), ~] = removeLocalStreaks(data_carried, s, min_low, 3,'valley');
+    [Y_local_removed(:,:,s), ~] = removeLocalStreaks(data_carried, s, factor*min_low, 3,'valley');
 
     %[Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(Y_local_removed(:,:,s), 1, 0.8* min_low);
+end
+for s = 1:size(data_carried,3)
+    if ~ismember(s, preprocessing_params.manualStreakRemoval_slices)
+        Y_local_removed(:,:,s) = data_carried(:,:,s);
+    end
 end
 data_carried = Y_local_removed;
 
 %% 2.4: AUTO Local Streak Removal (No UI)
 % This block runs streak correction, local streak removal, and interpolation in batch mode.
 
+% define the slices to run 
+preprocessing_params.autoStreakRemoval_slices = 1:25;
+factor1 = 1;
+factor2 = 1;
+preprocessing_params.autoStreakRemoval_factor1 = factor1;
+preprocessing_params.autoStreakRemoval_factor2 = factor2;
 data_local_removed_auto = zeros(size(data_carried));
-for s = 1:size(data_carried,3)
+for s = preprocessing_params.autoStreakRemoval_slices
     % 1. Find optimal threshold automatically (e.g., by minimizing variance)
-    %[~, var_list, low_list] = streak_correction(data_carried(:,:,s), 3, 'valley');
-    %[~, min_idx] = min(var_list);
-    %min_low = low_list(min_idx);
+    [~, var_list, low_list] = streak_correction(data_carried(:,:,s), 3, 'plateau');
+    [~, min_idx] = min(var_list);
+    min_low = low_list(min_idx);
 
     % 2. Remove local streaks automatically (no UI)
-    [data_local_removed_auto(:,:,s), ~] = removeLocalStreaks(data_carried, s, 0, 3, 'valley', true);
+    [data_local_removed_auto(:,:,s), ~] = removeLocalStreaks(data_carried, s, factor1*min_low, 3, 'plateau', true);
 
     % 3. Interpolate local streaks automatically (no UI)
-    %[Y_local_removed_auto(:,:,s), ~] = interpolateLocalStreaks(Y_local_removed_auto(:,:,s), 1, min_low, [], true);
+    %[data_local_removed_auto(:,:,s), ~] = interpolateLocalStreaks(data_local_removed_auto(:,:,s), 1, factor2*min_low, [], true);
     
     % print finished status
     fprintf('Finished slice %d\n', s);
 end
+% Copy back data_carried for slices not in autoStreakRemoval_slices
+for s = 1:size(data_carried,3)
+    if ~ismember(s, preprocessing_params.autoStreakRemoval_slices)
+        data_local_removed_auto(:,:,s) = data_carried(:,:,s);
+    end
+end
+
 data_carried = data_local_removed_auto;
 
 %% 2.5 defect masking
 % Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
 f1=figure;
 d3gridDisplay(data_carried,'dynamic');
-index = input('Enter defect slice number: ');
-num_defect_type = input('enter how many types of defects to mask: ');
+preprocessing_params.defect_slice = input('Enter defect slice number: ');
+preprocessing_params.num_defect_type = input('enter how many types of defects to mask: ');
 close(f1);
 % methods: 
 % 1. Gaussian window "gw"
 % 2. truncated gaussian gaussian smoothing "tg"
 % 3. thresholding and remove defect features "threshold"
-method = 'tg';
+preprocessing_params.defect_masking_method = 'tg';
 
-switch method
+switch preprocessing_params.defect_masking_method
     case 'gw'
         % Apply Gaussian window masking
-        [data_masked, ~] = defect_masking(data_carried, index);
+        [data_masked, ~] = defect_masking(data_carried, preprocessing_params.defect_slice);
     case 'tg'
         % Apply flat disk mask with Gaussian smoothing
-        [data_masked, defect_loc] = gaussianMaskDefects(data_carried,index, num_defect_type);
+        % Interactive mask creation and application:
+        if isfield(preprocessing_params, 'defect_mask') && ~isempty(preprocessing_params.defect_mask)
+            [data_masked, ~] = gaussianMaskDefects(data_carried, [], [], preprocessing_params.defect_mask);
+        else
+            [data_masked, preprocessing_params.defect_mask, defect_centers, sigmas] = gaussianMaskDefects(data_carried, preprocessing_params.defect_slice, preprocessing_params.num_defect_type);
+        end
     case 'threshold'
         % Apply threshold-based defect masking
-        [data_masked, defect_mask] = thresholdDefects(data_carried, index);
+        [data_masked, defect_mask] = thresholdDefects(data_carried, preprocessing_params.defect_slice);
     otherwise
         error('Unknown defect masking method. Choose "gw", "disk", or "threshold".');
 end
@@ -119,75 +147,34 @@ data_carried = data_masked;
 
 %% 2.6a: Correct streak
 % Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
 [data_streakremoved, QPI_nostreaks] = RemoveStreaks(data_carried, 'Direction', 'vertical');
 data_carried = data_streakremoved;
 
 %% 2.6b: heal
 % Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
-% heal the data_streakremoved midlines 
-% Ask user for direction to heal
-figure; 
-d3gridDisplay(qpiCalculate(data_carried),rangetype);
-direction = input('Enter direction to heal (horizontal/vertical/none): ', 's');
+preprocessing_params.heal_direction = input('Enter direction to heal (horizontal/vertical/none): ', 's');
 
 close;
 
-data_streakremoved_healed = data_carried; % Default if no healing is applied
-
-switch direction
-    case 'horizontal'
-        QPI = zeros(size(data_carried));
-        mid_row = round(size(QPI,1)/2)+1;
-        for i = 1:size(data_carried,3)
-            QPI(:,:,i) = fftshift(fft2(data_carried(:,:,i)));
-            % First heal the middle point using its neighbors
-            QPI(mid_row, :, i) = mean([QPI(mid_row-1, :, i); QPI(mid_row+1, :, i)], 1);
-            % Then heal mid-1 using its neighbors
-            QPI(mid_row-1, :, i) = mean([QPI(mid_row-2, :, i); QPI(mid_row, :, i)], 1);
-            % Finally heal mid+1 using its neighbors
-            QPI(mid_row+1, :, i) = mean([QPI(mid_row, :, i); QPI(mid_row+2, :, i)], 1);
-            data_streakremoved_healed(:,:,i) = real(ifft2(ifftshift(QPI(:,:,i))));
-        end
-    case 'vertical'
-        QPI = zeros(size(data_carried));
-        mid_col = round(size(QPI,2)/2);
-        for i = 1:size(data_carried,3)
-            QPI(:,:,i) = fftshift(fft2(data_carried(:,:,i)));
-            % First heal the middle point using its neighbors
-            QPI(:, mid_col, i) = mean([QPI(:, mid_col-1, i), QPI(:, mid_col+1, i)], 2);
-            % Then heal mid-1 using its neighbors
-            QPI(:, mid_col-1, i) = mean([QPI(:, mid_col-2, i), QPI(:, mid_col, i)], 2);
-            % Finally heal mid+1 using its neighbors
-            QPI(:, mid_col+1, i) = mean([QPI(:, mid_col, i), QPI(:, mid_col+2, i)], 2);
-            data_streakremoved_healed(:,:,i) = real(ifft2(ifftshift(QPI(:,:,i))));
-        end
-    case 'none'
-        % No healing needed, use data as is
-        disp('No healing applied');
-end
-
-figure; 
-d3gridDisplay(log(abs(qpiCalculate(data_streakremoved_healed))),rangetype);
-
-data_carried = data_streakremoved_healed;
+data_streakremoved_healed = heal_streaks(data_carried, preprocessing_params.heal_direction);
 
 %% 2.6c: directional_plane (optional, zero slope at one direction)
 % Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
-real_space_direction = 'vertical';
-[data_plane, mask] = d3plane_directional(data_carried, real_space_direction, 'LineWidth', 5);
+preprocessing_params.real_space_direction = 'horizontal';
+[data_plane, mask] = d3plane_directional(data_carried, preprocessing_params.real_space_direction, 'LineWidth', 5);
 data_carried = data_plane;
 
 %% 2.end: Normalize background 
-[Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, slice_normalize);
+[Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
 %% 3. Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('ZrSiTe_preprocessed0709_FULL.mat', 'Y', 'data_cropped','data_nostreaks','data_masked',"energy_range",'defect_loc')
+save('ZrSiTe_preprocessed0717_FULL2.mat', 'data_original', 'Y', 'data_cropped','data_masked','data_local_removed_auto',"energy_range",'defect_loc', 'preprocessing_params')
 
 
 %% Before Run Standardize
@@ -272,9 +259,9 @@ end
 
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 6;
+outerloop_maxIT= 8;
 %params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.05, 0.05, 0.05, 0.05];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.02, 0.02, 0.03, 0.03];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.2 * kernel_sizes);
@@ -649,7 +636,7 @@ end
 %% Run for all_slice
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 6;
+outerloop_maxIT= 8;
 
 params.lambda1 = [0.20, 0.20, 0.20, 0.20];  % regularization parameter for Phase I
 %params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
@@ -689,10 +676,10 @@ else
     [Aout_ALL, Xout_ALL, bout_ALL, ALL_extras] = MTSBD_all_slice(...
         Y_used, kernel_sizes, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
 end
-%%
-eta3dall = permute(repmat(eta_data3d,[6,1]),[2,1]);
+
+eta3dall = permute(repmat(eta_data3d,[8,1]),[2,1]);
 observation_fidelity = eta3dall./squeeze(var(ALL_extras.phase1.residuals, 0, [1,2]));
-save('ZrSiTe_slices[160,792]meV_[80,80]_good.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras', 'eta_data3d','observation_fidelity');
+save('ZrSiTe_slices[-168,152]meV_[80,80]_good.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras','params', 'eta_data3d','observation_fidelity');
 
 %% convert Aout_ALL to cell format
 Aout_ALL_cell = cell(num_slices, num_kernels);
@@ -710,28 +697,50 @@ for i = 40: 41
     visualizeRealResult(Y_used(:,:,i), Aout_ALL_cell(i,:), Xout_ALL, bout_ALL(i,:), pp);
 end 
 %% Kernels movies 
-
 for k = 1:length(Aout_ALL)
     figure;
     d3gridDisplay(Aout_ALL{k}, 'dynamic')
 end
 
 %% 
-Aout_show = [Aout_ALL{1},Aout_ALL{2},Aout_ALL{3},Aout_ALL{4}];
-Aout_show_norm = normalize(Aout_show,3);
+Aout_show = [];
+for i = 1: size(Aout_ALL3,1)
+    Aout_show3 = [Aout_show3,Aout_ALL3{i}];
+end
+
 figure;
-d3gridDisplay(Aout_show, 'dynamic')
+d3gridDisplay(Aout_show3, 'dynamic')
+
+%% Merge 3 ZrSiTe runs 
+Aout_Full_energy = cell(2,1);
+Aout_Full_energy{1,1}=C;
+Aout_Full_energy{2,1}=D;
 %%
-qpi_show = [qpiCalculate(Aout_ALL{1}),qpiCalculate(Aout_ALL{2}),qpiCalculate(Aout_ALL{3}),qpiCalculate(Aout_ALL{4})];
+save('ZrSiTe_kernel1&2_FULL_[80,80].mat', 'Y_used','Aout_Full_energy', 'Xout_A1', 'Xout_A2');
+
+%% Show FULL
+Aout_show_Full = [];
+for i = 1: size(Aout_Full_energy,1)
+    Aout_show_Full = [Aout_show_Full,Aout_Full_energy{i}];
+end
+
 figure;
-d3gridDisplay(qpi_show, 'dynamic')
+d3gridDisplay(Aout_show_Full, 'dynamic')
 
 %%
-Aout_show_norm = Aout_show;
-qpi_show_norm = qpi_show;
-for i = 1: 80
-    Aout_show_norm(:,:,i) = mat2gray(Aout_show(:,:,i));
-    qpi_show_norm(:,:,i) = abs(mat2gray(qpi_show(:,:,i),[0.1,1])-1);
+qpi_show_Full = [];
+for i = 1: size(Aout_Full_energy,1)
+    qpi_show_Full = [qpi_show_Full,qpiCalculate(Aout_Full_energy{i})];
+end
+figure;
+d3gridDisplay(qpi_show_Full, 'dynamic')
+
+%%
+Aout_show_norm = Aout_show_Full;
+qpi_show_norm = qpi_show_Full;
+for i = 1: 200
+    Aout_show_norm(:,:,i) = mat2gray(Aout_show_Full(:,:,i));
+    qpi_show_norm(:,:,i) = abs(mat2gray(qpi_show_Full(:,:,i),[0.01,1])-1);
 end
 ALL_show_norm = [Aout_show_norm;qpi_show_norm];
 figure; 

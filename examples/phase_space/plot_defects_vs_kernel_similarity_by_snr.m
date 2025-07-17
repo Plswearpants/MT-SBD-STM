@@ -46,8 +46,8 @@ SNR_idx = SNR_idx(valid);
 % After preparing defects, kernel_sim, SNR_idx, etc.
 x_min = min(defects);
 x_max = max(defects);
+cmap_data = load('metric_colormapv3.mat');
 
-cmap_data = load('metric_colormapv2.mat');
 
 % Plot: horizontal subplots, sharing the same Y axis
 figure;

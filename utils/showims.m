@@ -19,7 +19,7 @@ function showims( Y, A0, X0, A, X, k, kplus, idx )
    
     subplot(325); imagesc(abs(X0)); ylabel('abs(X)');
     subplot(326); imagesc(abs(X_hat));
-
+    colormap("gray");
     drawnow;
 end
 
