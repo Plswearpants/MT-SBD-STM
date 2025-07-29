@@ -13,7 +13,7 @@
 % QPI: Fourier transformed dIdV data
 
 % Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('QPImap012.3ds', 5);
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('Grid_20221107_HR_FF&CS.3ds', 5);
 xsize = header.grid_dim(1);
 ysize = header.grid_dim(2);
 elayer = header.points;
@@ -40,7 +40,7 @@ preprocessing_params.slice_normalize = input('slice to normalize: ');
 data_carried = data_braggremoved;
 
 %% 2.2: crop dataset
-mask= maskSquare(data_carried,0,preprocessing_params.slice_normalize,'square');
+mask= maskSquare(data_carried,preprocessing_params.slice_normalize,'square');
 data_cropped= gridCropMask(data_carried, mask);
 data_carried = data_cropped;
 
@@ -158,8 +158,6 @@ data_carried = data_streakremoved;
 
 preprocessing_params.heal_direction = input('Enter direction to heal (horizontal/vertical/none): ', 's');
 
-close;
-
 data_streakremoved_healed = heal_streaks(data_carried, preprocessing_params.heal_direction);
 
 %% 2.6c: directional_plane (optional, zero slope at one direction)
@@ -174,7 +172,7 @@ data_carried = data_plane;
 [Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
 %% 3. Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('ZrSiTe_preprocessed0717_FULL2.mat', 'data_original', 'Y', 'data_cropped','data_masked','data_local_removed_auto',"energy_range",'defect_loc', 'preprocessing_params')
+save('LiFeAs_processed0721_FULL.mat', 'data_original', 'Y', 'data_cropped','data_masked',"energy_range", 'preprocessing_params')
 
 
 %% Before Run Standardize
@@ -211,13 +209,12 @@ axis square;
 % draw square on the data to include as many visible ripples of the scattering as possible 
 same_size = 1;
 kerneltype = 'selected';
-window_type = {'gaussian', 2.5};
+window_type = {'gaussian', 2};
 %window_type = '';
-
 
 if same_size
     %[square_size] = squareDrawSize(Y_ref);
-    square_size=[80,80];
+    square_size=[60,60];
     kernel_sizes = repmat(square_size,[num_kernels,1]);
     A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
 else
@@ -261,11 +258,11 @@ end
 miniloop_iteration = 1;
 outerloop_maxIT= 8;
 %params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.02, 0.02, 0.03, 0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.05, 0.025, 0.03, 0.03];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.2 * kernel_sizes);
-params_ref.lambda2 = [0.05, 0.05, 0.05, 0.15];  % FINAL reg. param. value for Phase II
+params_ref.lambda2 = [0.03, 0.05, 0.05, 0.05];  % FINAL reg. param. value for Phase II
 params_ref.nrefine = 4;
 params_ref.signflip = 0.2;
 params_ref.xpos = true;
@@ -280,7 +277,8 @@ params_ref.noise_var = eta_data;
 [A_ref, X_ref, b_ref, extras_ref] = MT_SBD(Y_ref, kernel_sizes, params_ref, dispfun, A1_ref, miniloop_iteration, outerloop_maxIT);
 
 %% Visualize Reference result 
-Y_rec = visualizeRealResult(Y_ref,A_ref, X_ref, b_ref, extras_ref);
+[Y_rec,Y_rec_all] = visualizeRealResult(Y_ref,A_ref, X_ref, b_ref, extras_ref);
+
 
 %% compare the Xout vs X manual
 X0=zeros([size(Y_ref,1),size(Y_ref,2),length(defect_loc)]);
@@ -339,7 +337,7 @@ end
 miniloop_iteration = 1;
 outerloop_maxIT= 5;
 
-params_ref.lambda1 = [0.05, 0.02, 0.02,0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.03, 0.03, 0.03, 0.03];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.5 * kernel_sizes);
@@ -357,6 +355,11 @@ params_ref.noise_var = eta_data;
 [A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad] = MT_SBD(Y_ref, kernel_sizes_pad, params_ref, dispfun, A1_ref, miniloop_iteration, outerloop_maxIT);
 %% Visualize Padded result 
 visualizeRealResult(Y_ref,A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad);
+%% Reconstructed Y 
+Y_rec_pad = zeros([size(Y_ref),num_kernels]);
+for k = 1:num_kernels
+    Y_rec_pad(:,:,k) = convfft2(A_ref_pad{1,k}, X_ref_pad(:,:,k)) + b_ref_pad(k);
+end
 %% Save the padded ones 
 padfilename = sprintf('MTSBD_LiFeAs_%f meV.mat',1000*params_ref.energy);
 %save(padfilename,'Y_ref','A_ref_pad', 'X_ref_pad', 'b_ref_pad', 'extras_ref_pad', 'params_ref');
@@ -627,7 +630,7 @@ eta_data3d = estimate_noise3D(Y, 'std');
 
 %% initialize xinit for all slices with reference slice
 for k = 1:num_kernels
-    params.xinit{k}.X = X_ref(:,:,k);
+    params.xinit{k}.X = X_ref_pad(:,:,k);
     b_temp = extras_ref.phase1.biter(k); 
     params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
 end
@@ -636,9 +639,9 @@ end
 %% Run for all_slice
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 8;
+outerloop_maxIT= 6;
 
-params.lambda1 = [0.20, 0.20, 0.20, 0.20];  % regularization parameter for Phase I
+params.lambda1 = [0.225, 0.27, 0.27, 0.27];  % regularization parameter for Phase I
 %params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params.phase2 = false;
 params.kplus = ceil(0.5 * kernel_sizes);
@@ -677,11 +680,12 @@ else
         Y_used, kernel_sizes, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
 end
 
-eta3dall = permute(repmat(eta_data3d,[8,1]),[2,1]);
+eta3dall = permute(repmat(eta_data3d,[6,1]),[2,1]);
 observation_fidelity = eta3dall./squeeze(var(ALL_extras.phase1.residuals, 0, [1,2]));
-save('ZrSiTe_slices[-168,152]meV_[80,80]_good.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras','params', 'eta_data3d','observation_fidelity');
+save('ZrSiTe_pos_meV_[100,100]_good.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras','params', 'eta_data3d','observation_fidelity');
 
 %% convert Aout_ALL to cell format
+[num_slices, num_kernels] = size(bout_ALL);
 Aout_ALL_cell = cell(num_slices, num_kernels);
 for s = 1:num_slices
     for k = 1:num_kernels
@@ -699,17 +703,48 @@ end
 %% Kernels movies 
 for k = 1:length(Aout_ALL)
     figure;
-    d3gridDisplay(Aout_ALL{k}, 'dynamic')
+    d3gridDisplay(((Aout_ALL{k})), 'dynamic')
 end
+%% QPI movies 
+for k = 1:length(Aout_ALL)
+    figure;
+    d3gridDisplay((qpiCalculate(Aout_ALL{k})), 'dynamic',-1)
+end
+%% Plot gaussianed activation
+Xout_gaussian = zeros(size(Xout_ALL));
+kernel_size = size(Aout_ALL_cell{1,1});
+for i = 1:size(Xout_ALL, 3)
+    Xout_gaussian(:,:,i) = Xout_gaussian_broaden(Xout_ALL(:,:,i), kernel_size);
+    figure; imagesc(Xout_gaussian(:,:,i)); colormap("gray"); axis square
+    title(sprintf('Kernel type %d', i))
+end
+%% Create reconstruction for all slices
+Y_rec = zeros(size(Y_used));
+for i = 1:size(Y_used,3)
+    for k = 1:num_kernels
+        Y_rec(:,:,i) = Y_rec(:,:,i) + convfft2(Aout_ALL_cell{i,k}, Xout_ALL(:,:,k)) + bout_ALL(i,k);
+    end
+end
+figure;
+d3gridDisplay(Y_rec, 'dynamic')
 
 %% 
 Aout_show = [];
-for i = 1: size(Aout_ALL3,1)
-    Aout_show3 = [Aout_show3,Aout_ALL3{i}];
+for i = 1: size(Aout_ALL,1)
+    Aout_show = [Aout_show,mat2gray(Aout_ALL{i})];
 end
 
 figure;
-d3gridDisplay(Aout_show3, 'dynamic')
+d3gridDisplay(Aout_show, 'dynamic')
+
+%% 
+qpi_show = [];
+for i = 1: size(Aout_ALL,1)
+    qpi_show = [qpi_show,mat2gray(qpiCalculate(Aout_ALL{i}),[0.01,1])];
+end
+
+figure;
+d3gridDisplay(qpi_show, 'dynamic')
 
 %% Merge 3 ZrSiTe runs 
 Aout_Full_energy = cell(2,1);
@@ -720,7 +755,8 @@ save('ZrSiTe_kernel1&2_FULL_[80,80].mat', 'Y_used','Aout_Full_energy', 'Xout_A1'
 
 %% Show FULL
 Aout_show_Full = [];
-for i = 1: size(Aout_Full_energy,1)
+%for i = 1: size(Aout_Full_energy,1)
+for i = 1
     Aout_show_Full = [Aout_show_Full,Aout_Full_energy{i}];
 end
 
@@ -729,7 +765,8 @@ d3gridDisplay(Aout_show_Full, 'dynamic')
 
 %%
 qpi_show_Full = [];
-for i = 1: size(Aout_Full_energy,1)
+%for i = 1: size(Aout_Full_energy,1)
+for i = 1
     qpi_show_Full = [qpi_show_Full,qpiCalculate(Aout_Full_energy{i})];
 end
 figure;
@@ -1110,3 +1147,23 @@ fprintf('Best Reconstruction Quality: %.4f (at %.1f meV)\n', max(reconstruction_
 fprintf('Worst Reconstruction Quality: %.4f (at %.1f meV)\n', min(reconstruction_quality), energy_selected(reconstruction_quality == min(reconstruction_quality)) * 1000);
 
 fprintf('\nSequential results visualization complete!\n');
+
+function Xout_gaussian = Xout_gaussian_broaden(X_out, kernel_sizes)
+%XOUT_GAUSSIAN_BROADEN Apply Gaussian broadening to each channel of X_out based on kernel size.
+%   Xout_gaussian = Xout_gaussian_broaden(X_out, kernel_sizes)
+%   - X_out: [H x W x num_kernels] activation map
+%   - kernel_sizes: [num_kernels x 2] array, each row is [height, width] for the kernel
+%   - Xout_gaussian: [H x W x num_kernels] activation map after Gaussian broadening
+
+    [h, w, num_kernels] = size(X_out);
+    Xout_gaussian = zeros(h, w, num_kernels);
+    for k = 1:num_kernels
+        sigma = min(kernel_sizes(k,:)) / 10;
+        window_size = ceil(3 * sigma);
+        [x, y] = meshgrid(-window_size:window_size);
+        gaussian_kernel = exp(-(x.^2 + y.^2)/(2*sigma^2));
+        gaussian_kernel = gaussian_kernel / sum(gaussian_kernel(:));
+        % Apply Gaussian broadening
+        Xout_gaussian(:,:,k) = conv2(X_out(:,:,k), gaussian_kernel, 'same');
+    end
+end 

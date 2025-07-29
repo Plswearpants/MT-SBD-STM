@@ -25,6 +25,10 @@ function Y_reconstructed = visualizeResults(Y, A0, Aout, X0, Xout, bout, extras,
         idx_str = sprintf('\nDataset # %d, Parameter Set # %d', indices(1), indices(2));
     end
 
+    % Define colormaps
+    grayMap = gray;
+    invgray = flipud(grayMap);
+
     % 2. Kernel Quality Analysis (using QPI patterns)
     fprintf('\nAnalyzing Kernel Quality with QPI Patterns:\n');
     if nargin > 7 && ~isempty(indices)
@@ -66,12 +70,16 @@ function Y_reconstructed = visualizeResults(Y, A0, Aout, X0, Xout, bout, extras,
     figure('Name', 'Full Image Comparison');
     subplot(121);
     imagesc(Y);
+    ax1 = gca;
+    colormap(ax1, grayMap);
     title(['Original Image']);
     colorbar;
     axis image;
 
     subplot(122);
     imagesc(Y_reconstructed);
+    ax2 = gca;
+    colormap(ax2, grayMap);
     title(['Reconstructed Image']);
     colorbar;
     axis image;

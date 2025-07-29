@@ -1,5 +1,7 @@
-function d3gridDisplay(LDoS_noisy, rangeType)
+function d3gridDisplay(LDoS_noisy, rangeType, use_invgray)
 % Displays a 3D dataset using a specified colormap and range type.
+%   d3gridDisplay(LDoS_noisy, rangeType, use_invgray)
+%   use_invgray: optional, if -1 uses invgray, otherwise uses gray (default: 0)
 %   This function visualizes a 3D dataset by converting each slice to an image 
 %   using a colormap and either a global or dynamic range. The processed slices 
 %   are then displayed as a 3D image stack.
@@ -7,6 +9,7 @@ function d3gridDisplay(LDoS_noisy, rangeType)
 % Arguments:
 %   LDoS_noisy  3D array containing the data to be displayed.
 %   rangeType   Type of range for visualization ('global' or 'dynamic').
+%   use_invgray Optional, if -1 uses invgray, otherwise uses gray (default: 0).
 %
 % Returns:
 %   None. The function displays the 3D dataset as an image stack.
@@ -17,6 +20,10 @@ function d3gridDisplay(LDoS_noisy, rangeType)
 %   d3gridDisplay_QPISIM(LDoS_noisy, 'global');
 %   This example displays the dataset with a global intensity range across slices.
 
+if nargin < 3 || isempty(use_invgray)
+    use_invgray = 0;
+end
+
 % Validate and heal input data
 validateData(LDoS_noisy);
 LDoS_noisy = dataHealing(LDoS_noisy);
@@ -25,8 +32,11 @@ LDoS_noisy = dataHealing(LDoS_noisy);
 LDoS_noisy = normalizeData(LDoS_noisy);
 
 % Load colormap
-load('invgray');
-map = gray;
+if use_invgray == -1
+    map = flipud(gray);
+else
+    map = gray;
+end
 
 % Determine global min and max values if global range is selected
 if strcmp(rangeType, 'global')

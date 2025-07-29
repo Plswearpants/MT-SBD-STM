@@ -1,4 +1,4 @@
-function Y_rec= visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
+function [Y_rec,Y_rec_split]= visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     % Visualize results from SBD-STM reconstruction for real data
     %
     % Inputs:
@@ -11,34 +11,46 @@ function Y_rec= visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     
     % Get original observation and residual
     Y = Y_ref;  % Original observation
-    Y_res = extras_ref.phase1.residuals(:,:,end);  % Final residual
+    %Y_res = extras_ref.phase1.residuals(:,:,end);  % Final residual
     
     % Compute reconstructed image
     Y_rec = zeros(size(Y));
-    for i = 1:num_kernels
-        Y_rec = Y_rec + convfft2(A_ref{i}, X_ref(:,:,i));
-        Y_rec = Y_rec + b_ref(i);  % Add bias term if needed
+    Y_rec_split = zeros([size(Y),num_kernels]);
+    
+    for i = 1:num_kernels        
+        Y_rec_split(:,:,i) = convfft2(A_ref{i}, X_ref(:,:,i))+ b_ref(i);
+        Y_rec = Y_rec + Y_rec_split(:,:,i);
     end
+    
+    
+    Y_res = Y-Y_rec;
+
+    % Define colormaps
+    grayMap = gray;
+    invgray = flipud(grayMap);
     
     % 1. Original vs Reconstructed vs Residual (1x3 plot)
     figure('Name', 'Image Comparison');
     subplot(131);
     imagesc(Y);
-    colormap(invgray);
+    ax1 = gca;
+    colormap(ax1, grayMap);
     title('Original Image');
     colorbar;
     axis image;
     
     subplot(132);
     imagesc(Y_rec);
-    colormap(invgray);
+    ax2 = gca;
+    colormap(ax2, grayMap);
     title('Reconstructed Image');
     colorbar;
     axis image;
     
     subplot(133);
     imagesc(Y_res);
-    colormap(invgray);
+    ax3 = gca;
+    colormap(ax3, grayMap);
     title('Residual Image');
     colorbar;
     axis image;
@@ -58,7 +70,8 @@ function Y_rec= visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     % 2. Auto-contrasted Residual
     figure('Name', 'Auto-contrasted Residual');
     imagesc(Y_res);
-    colormap(invgray);
+    ax4 = gca;
+    colormap(ax4, grayMap);
     title('Auto-contrasted Residual');
     colorbar;
     axis image;
@@ -73,7 +86,8 @@ function Y_rec= visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     % Plot Q-space of original image
     subplot(2, num_kernels + 1, num_kernels + 2);
     imagesc(Q_Y_avg);
-    colormap(invgray);
+    ax5 = gca;
+    colormap(ax5, invgray);
     title('Q-space (Original)');
     colorbar;
     axis image;
@@ -86,14 +100,16 @@ function Y_rec= visualizeRealResult(Y_ref, A_ref, X_ref, b_ref, extras_ref)
     
         subplot(2, num_kernels + 1, k + 1);
         imagesc(A_ref{k});
-        colormap(invgray);
+        ax6 = gca;
+        colormap(ax6, grayMap);
         title(['Kernel ' num2str(k) ' (Original)']);
         colorbar;
         axis square;
 
         subplot(2, num_kernels + 1, num_kernels+ k + 2);
         imagesc(Q_kernel_avg);
-        colormap(invgray);
+        ax7 = gca;
+        colormap(ax7, invgray);
         title(['Q-space (Kernel ' num2str(k) ')']);
         colorbar;
         axis image;
