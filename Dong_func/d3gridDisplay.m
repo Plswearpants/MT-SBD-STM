@@ -48,7 +48,7 @@ end
 slicedglob_LDoS = zeros(size(LDoS_noisy, 1), size(LDoS_noisy, 2), size(LDoS_noisy, 3), 3);
 
 % nos number of standard deviations for dynamic range, larger nos more range.
-nos = 25;  % Reduced from 8 to handle normalized data better
+nos = 8;  % Reduced from 8 to handle normalized data better
 
 % Convert LDoS_result to image format using the colormap
 for k = 1:size(LDoS_noisy, 3)
@@ -58,7 +58,7 @@ for k = 1:size(LDoS_noisy, 3)
         if ~isempty(validData)
             MeddIdV = median(validData(:));
             Stdv = std(validData(:));
-            range = [max(0, MeddIdV-nos*Stdv) min(1, MeddIdV+nos*Stdv)];
+            range = [max(min(validData(:)), MeddIdV-nos*Stdv) min(max(validData(:)), MeddIdV+nos*Stdv)];
         else
             range = [0 1];
         end

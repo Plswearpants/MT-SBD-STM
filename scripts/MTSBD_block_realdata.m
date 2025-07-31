@@ -132,11 +132,11 @@ switch preprocessing_params.defect_masking_method
     case 'tg'
         % Apply flat disk mask with Gaussian smoothing
         % Interactive mask creation and application:
-        if isfield(preprocessing_params, 'defect_mask') && ~isempty(preprocessing_params.defect_mask)
-            [data_masked, ~] = gaussianMaskDefects(data_carried, [], [], preprocessing_params.defect_mask);
-        else
+        %if isfield(preprocessing_params, 'defect_mask') && ~isempty(preprocessing_params.defect_mask)
+            %[data_masked, ~] = gaussianMaskDefects(data_carried, [], [], preprocessing_params.defect_mask);
+        %else
             [data_masked, preprocessing_params.defect_mask, defect_centers, sigmas] = gaussianMaskDefects(data_carried, preprocessing_params.defect_slice, preprocessing_params.num_defect_type);
-        end
+        %end
     case 'threshold'
         % Apply threshold-based defect masking
         [data_masked, defect_mask] = thresholdDefects(data_carried, preprocessing_params.defect_slice);
@@ -635,7 +635,6 @@ for k = 1:num_kernels
     params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
 end
 
-
 %% Run for all_slice
 % SBD settings.
 miniloop_iteration = 1;
@@ -685,11 +684,11 @@ observation_fidelity = eta3dall./squeeze(var(ALL_extras.phase1.residuals, 0, [1,
 save('ZrSiTe_pos_meV_[100,100]_good.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras','params', 'eta_data3d','observation_fidelity');
 
 %% convert Aout_ALL to cell format
-[num_slices, num_kernels] = size(bout_ALL);
+%[num_slices, num_kernels] = size(bout_ALL);
 Aout_ALL_cell = cell(num_slices, num_kernels);
 for s = 1:num_slices
     for k = 1:num_kernels
-        Aout_ALL_cell{s,k} = Aout_ALL{k}(:,:,s);
+        Aout_ALL_cell{s,k} = Aout_Full_energy{k}(:,:,s);
     end
 end
 
@@ -728,6 +727,43 @@ end
 figure;
 d3gridDisplay(Y_rec, 'dynamic')
 
+%% Create reconstruction for each kernel type
+Y_rec_each = zeros([num_kernels,size(Y_used)]);
+for i = 1:size(Y_used,3)
+    for k = 1:num_kernels
+        %Y_rec_each(k,:,:,i) = convfft2(Aout_ALL_cell{i,k}, Xout_ALL(:,:,k)) + bout_ALL(i,k);
+        Y_rec_each(k,:,:,i) = convfft2(Aout_ALL_cell{i,k}, Xout_ALL(:,:,k));
+    end
+end
+% create fft of Y_rec_each
+FT_QPI_Y_rec_each = zeros([num_kernels,size(Y_used)]);
+for k = 1:num_kernels
+    FT_QPI_Y_rec_each(k,:,:,:) = qpiCalculate(squeeze(Y_rec_each(k,:,:,:)));
+end
+
+%% Normalize and combine Y_rec_each and its FT-QPI using method 2
+% Reshape Y_rec_each and FT_QPI_Y_rec_each to combine all kernels
+Y_rec_show_Full = [];
+qpi_Y_rec_show_Full = [];
+for k = 1:num_kernels
+    Y_rec_show_Full = [Y_rec_show_Full, squeeze(Y_rec_each(k,:,:,:))];
+    qpi_Y_rec_show_Full = [qpi_Y_rec_show_Full, squeeze(FT_QPI_Y_rec_each(k,:,:,:))];
+end
+
+% Normalize each slice across all kernels
+for i = 1:size(Y_rec_show_Full,3)
+    Y_rec_show_Full(:,:,i) = mat2gray(Y_rec_show_Full(:,:,i));
+    qpi_Y_rec_show_Full(:,:,i) = 1-mat2gray(qpi_Y_rec_show_Full(:,:,i),[0,1]);
+end
+
+% Combine normalized reconstructions and their FT-QPI
+Y_rec_ALL_show_norm = [Y_rec_show_Full; qpi_Y_rec_show_Full];
+
+%% Display the normalized and combined results
+figure;
+d3gridDisplay(Y_rec_ALL_show_norm, 'dynamic');
+title('Normalized Y_{rec}_-{each} and FT-QPI combined');
+
 %% 
 Aout_show = [];
 for i = 1: size(Aout_ALL,1)
@@ -740,7 +776,7 @@ d3gridDisplay(Aout_show, 'dynamic')
 %% 
 qpi_show = [];
 for i = 1: size(Aout_ALL,1)
-    qpi_show = [qpi_show,mat2gray(qpiCalculate(Aout_ALL{i}),[0.01,1])];
+    qpi_show = [qpi_show,mat2gray(qpiCalculate(Aout_ALL{i}),[0,1])];
 end
 
 figure;
@@ -755,8 +791,7 @@ save('ZrSiTe_kernel1&2_FULL_[80,80].mat', 'Y_used','Aout_Full_energy', 'Xout_A1'
 
 %% Show FULL
 Aout_show_Full = [];
-%for i = 1: size(Aout_Full_energy,1)
-for i = 1
+for i = 1: size(Aout_Full_energy,1)
     Aout_show_Full = [Aout_show_Full,Aout_Full_energy{i}];
 end
 
@@ -765,24 +800,27 @@ d3gridDisplay(Aout_show_Full, 'dynamic')
 
 %%
 qpi_show_Full = [];
-%for i = 1: size(Aout_Full_energy,1)
-for i = 1
+for i = 1: size(Aout_Full_energy,1)
     qpi_show_Full = [qpi_show_Full,qpiCalculate(Aout_Full_energy{i})];
 end
 figure;
-d3gridDisplay(qpi_show_Full, 'dynamic')
+d3gridDisplay(qpi_show_Full, 'dynamic',-1)
 
 %%
 Aout_show_norm = Aout_show_Full;
 qpi_show_norm = qpi_show_Full;
 for i = 1: 200
     Aout_show_norm(:,:,i) = mat2gray(Aout_show_Full(:,:,i));
-    qpi_show_norm(:,:,i) = abs(mat2gray(qpi_show_Full(:,:,i),[0.01,1])-1);
+    qpi_show_norm(:,:,i) = abs(mat2gray(qpi_show_Full(:,:,i),[0,1])-1);
 end
 ALL_show_norm = [Aout_show_norm;qpi_show_norm];
 figure; 
 d3gridDisplay(ALL_show_norm, 'dynamic');
 
+%% write the video 
+gridVideoWriter(rot90(ALL_show_norm), V, 'dynamic', 100, 'gray', 0, [800 800]);
+
+% delay unit? 
 %% QPI movies 
 for k = 1:length(Aout_ALL)
     figure;
