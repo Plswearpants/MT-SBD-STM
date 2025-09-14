@@ -1,9 +1,13 @@
 function plot_parameter_slices(metrics)
-    % Define metrics to plot (same as heatmaps)
-    metric_fields = {'kernel_quality_final', 'activation_accuracy_final', ...
-                     'runtime', 'demixing_score'};
-    metric_names = {'Kernel Quality', 'Activation Recovery', ...
-                   'Runtime (s)', 'Demixing Score'};
+    % Define metrics to plot (replace activation and demixing scores with combined score)
+    metric_fields = {'kernel_quality_final', 'combined_score', 'runtime'};
+    metric_names = {'Kernel Quality', 'Combined Score', 'Runtime (s)'};
+
+    % Compute combined score if not already present
+    if ~isfield(metrics, 'combined_score')
+        metrics.combined_score = computeCombined_activationScore(metrics.demixing_score, ...
+                                                metrics.activation_accuracy_final);
+    end
     
     % Get parameter values
     lambda1_values = metrics.lambda1_values;
@@ -96,34 +100,6 @@ function plot_parameter_slices(metrics)
     updateLambda1Plot();
     updateMiniLoopPlot();
     
-    % 3. Create overview plot with lambda1 as x-axis
-    fig3 = figure('Position', [200 200 1200 800], ...
-        'Name', 'Overview: Metrics vs Lambda1');
-    
-    % Create plot panel for lambda1 overview
-    t3 = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
-    
-    % Plot each metric
-    for m = 1:length(metric_fields)
-        ax = nexttile(t3);
-        plotMetricOverview(ax, metrics, metric_fields{m}, metric_names{m}, 'lambda1');
-    end
-    sgtitle('Metrics vs Lambda1 (All Mini-loop Values)');
-    
-    % 4. Create overview plot with mini_loop as x-axis
-    fig4 = figure('Position', [250 250 1200 800], ...
-        'Name', 'Overview: Metrics vs Mini-loop');
-    
-    % Create plot panel for mini_loop overview
-    t4 = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
-    
-    % Plot each metric
-    for m = 1:length(metric_fields)
-        ax = nexttile(t4);
-        plotMetricOverview(ax, metrics, metric_fields{m}, metric_names{m}, 'mini_loop');
-    end
-    sgtitle('Metrics vs Mini-loop (All Lambda1 Values)');
-    
     function updateLambda1Plot(~,~)
         mini_loop_idx = fig1.UserData.mini_loop_selector.Value;
         highlighted_dataset = fig1.UserData.highlighted_dataset;
@@ -132,8 +108,8 @@ function plot_parameter_slices(metrics)
         % Clear previous plots
         delete(fig1.UserData.plot_panel.Children);
         
-        % Create new tiledlayout
-        t = tiledlayout(fig1.UserData.plot_panel, 2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+        % Create new tiledlayout with 1x3 format
+        t = tiledlayout(fig1.UserData.plot_panel, 1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
         
         % Plot each metric
         for m = 1:length(metric_fields)
@@ -153,8 +129,8 @@ function plot_parameter_slices(metrics)
         % Clear previous plots
         delete(fig2.UserData.plot_panel.Children);
         
-        % Create new tiledlayout
-        t = tiledlayout(fig2.UserData.plot_panel, 2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+        % Create new tiledlayout with 1x3 format
+        t = tiledlayout(fig2.UserData.plot_panel, 1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
         
         % Plot each metric
         for m = 1:length(metric_fields)

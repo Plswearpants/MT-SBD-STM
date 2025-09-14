@@ -77,11 +77,31 @@ function plot_performance_heatmaps(metrics)
     % Create subplot layout within the plot panel - now 2x3 instead of 2x2
     t = tiledlayout(plot_panel, 2, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
     
+    % Define distinct colors for datasets
+    distinct_colors = [
+        0.8500    0.3250    0.0980;  % Orange
+        0         0.4470    0.7410;  % Blue
+        0.9290    0.6940    0.1250;  % Yellow
+        0.4940    0.1840    0.5560;  % Purple
+        0.4660    0.6740    0.1880;  % Green
+        0.6350    0.0780    0.1840;  % Dark Red
+        0         0.7500    0.7500;  % Cyan
+        0.7500    0         0.7500;  % Magenta
+        0.2500    0.2500    0.2500;  % Gray
+        0.9500    0.5000    0.2000;  % Light Orange
+        0.1000    0.5000    0.5000;  % Teal
+        0.5000    0.5000    0;       % Olive
+    ];
+    
+    % Define marker shapes for different lambda or mini-loop values
+    marker_shapes = {'o', 's', 'd', '^', 'v', '>', '<', 'p', 'h', '*', '+', 'x'};
+    
+    % Use distinct_colors for 3D heatmaps
     for i = 1:5
         ax = nexttile(t);
         fig.UserData.surfaces{i} = plot_metric_surface(ax, metrics.(fields{i}), ...
             metrics.lambda1_values, metrics.mini_loop_values, titles{i}, ...
-            fig.UserData.highlighted_dataset, fig.UserData.other_alpha);
+            fig.UserData.highlighted_dataset, fig.UserData.other_alpha, distinct_colors);
         title(ax, titles{i});
     end
     
@@ -122,7 +142,7 @@ function plot_performance_heatmaps(metrics)
     end
 end
 
-function surfaces = plot_metric_surface(ax, data, lambda1_values, mini_loop_values, title_str, highlighted_dataset, other_alpha)
+function surfaces = plot_metric_surface(ax, data, lambda1_values, mini_loop_values, title_str, highlighted_dataset, other_alpha, distinct_colors)
     % Create meshgrid for surface
     [X, Y] = meshgrid(lambda1_values, mini_loop_values);
     
@@ -136,22 +156,6 @@ function surfaces = plot_metric_surface(ax, data, lambda1_values, mini_loop_valu
         % For array metrics with 3D structure (datasets × mini_loop × lambda1)
         num_datasets = size(data, 1);
         surfaces = gobjects(num_datasets, 1);
-        
-        % Define distinct colors (keep existing colors)
-        distinct_colors = [
-            0.8500    0.3250    0.0980;  % Orange
-            0         0.4470    0.7410;  % Blue
-            0.9290    0.6940    0.1250;  % Yellow
-            0.4940    0.1840    0.5560;  % Purple
-            0.4660    0.6740    0.1880;  % Green
-            0.6350    0.0780    0.1840;  % Dark Red
-            0         0.7500    0.7500;  % Cyan
-            0.7500    0         0.7500;  % Magenta
-            0.2500    0.2500    0.2500;  % Gray
-            0.9500    0.5000    0.2000;  % Light Orange
-            0.1000    0.5000    0.5000;  % Teal
-            0.5000    0.5000    0;       % Olive
-        ];
         
         for i = 1:num_datasets
             % Extract 2D slice for this dataset

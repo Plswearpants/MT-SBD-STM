@@ -4,6 +4,9 @@ metrics = load_parallel_results();
 %% Create the heatmaps
 plot_performance_heatmaps(metrics);
 
+%% Projected plot
+plot_2d_projections(metrics);
+
 %% Create parameter slices  
 plot_parameter_slices(metrics);
 
