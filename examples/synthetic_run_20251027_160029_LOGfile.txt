@@ -1,0 +1,4 @@
+DATE and TIME         BLOCK   COMMENT
+27-Oct-2025 16:00:29  INIT    === Synthetic Data Workflow Started ===
+27-Oct-2025 16:00:35  GD01A   SNR=5, N_obs=50, resolution=3, density=0.01, slices=2
+27-Oct-2025 16:01:17  GD01A   SNR=5, N_obs=50, resolution=3, density=0.01, slices=2

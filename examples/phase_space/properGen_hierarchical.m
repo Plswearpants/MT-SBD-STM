@@ -24,9 +24,9 @@ fixed_params.N_single = N;                      % Input lattice size
 fixed_params.num_kernels = num_kernels;         % Number of kernels
 
 % Define parameter ranges for param_sets
-SNR_values = [3, 1, 0.5];                     % Different noise levels
-defect_density_values = logspace(-3, -1, 4);    % Different activation densities
-N_obs_values = [50, 100, 150];           % Different observation lattice sizes
+SNR_values = [3, 1];                     % Different noise levels
+defect_density_values = logspace(-3, -2, 2);    % Different activation densities
+N_obs_values = [50, 100];           % Different observation lattice sizes
 
 % Create parameter set matrix
 [S, D, N] = meshgrid(SNR_values, defect_density_values, N_obs_values);

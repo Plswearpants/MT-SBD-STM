@@ -2,7 +2,7 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-load('results\synthetic_datasets\synthetic_datasets_20250628_220033.mat');  
+load('results\synthetic_datasets\synthetic_datasets_20251021_132158.mat');  
 
 %% Visualize pre-initialized kernels for random datasets
 fprintf('Displaying pre-initialized kernels for 4 random datasets...\n');
@@ -19,7 +19,7 @@ end
 drawnow;
 
 %% Define optimal parameters
-lambda1_optimal = 0.2;  % optimal regularization strength
+lambda1_optimal = 0.1;  % optimal regularization strength
 mini_loop_optimal = 2;  % optimal iteration count
 maxIT = 10;
 
@@ -65,7 +65,7 @@ fprintf('Starting parallel processing of %d datasets\n', num_datasets);
 params_all = cell(num_datasets, 1);
 for n = 1:num_datasets
     params_all{n} = struct();
-    params_all{n}.phase2 = true;  % Enable Phase 2
+    params_all{n}.phase2 = false;  % Enable Phase 2
     params_all{n}.Xsolve = 'FISTA';
     params_all{n}.xpos = true;
     params_all{n}.getbias = true;
@@ -115,7 +115,7 @@ parfor n = 1:num_datasets
 end
 
 %% Cleanup worker configs
-rmdir(config_dir, 's');
+rmdir(config_dir, 's'); 
 
 fprintf('Processing complete!\n');
 
