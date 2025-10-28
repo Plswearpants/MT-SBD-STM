@@ -1,4 +1,3 @@
-%% ========================================================================
 %  TRUNK SCRIPT: Synthetic Data MT-SBD-STM Analysis
 %  ========================================================================
 %  Multi-kernel Tensor Shifted Blind Deconvolution for Scanning Tunneling 
@@ -36,7 +35,6 @@
 %  See docs/parameter_glossary.md for complete parameter definitions
 %
 % =========================================================================
-
 %% SECTION 0: WORKSPACE INITIALIZATION
 % =========================================================================
 % Clear workspace and initialize paths
@@ -64,7 +62,7 @@ fprintf('Log file: %s_LOGfile.txt\n\n', LOGfile);
 
 
 %% =========================================================================
-%% GD01A: Generate-Data-01-A; Generate Synthetic Test Data
+%% GD01A: Generate-Data-01-A; Generate Normalized Synthetic Test Data
 %  =========================================================================
 %  Edited by Dong Chen, 2025-10-27
 %
@@ -72,7 +70,7 @@ fprintf('Log file: %s_LOGfile.txt\n\n', LOGfile);
 %  energy slices. Uses LDoS simulation data and creates realistic defect
 %  patterns with controlled SNR.
 %
-%  Dependencies: generateSyntheticData.m (wrapper)
+%  Dependencies: generateSyntheticData.m
 
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
@@ -82,7 +80,7 @@ N_obs = 50;                     % Observation lattice size (pixels)
 observation_resolution = 3;     % Resolution: pixels per lattice site
 defect_density = 0.01;          % Surface defect density (0-1)
 num_slices = 2;                 % Number of energy slices
-LDoS_path = 'LDoS_single_defects_self=0.6_save.mat';
+LDoS_path = 'C:\Users\CAD\Documents\GitHub\MT-SBD-STM\examples\example_data\LDoS_single_defects_self=0.6_save.mat';
 vis_generation = false;         % Show intermediate generation steps
 normalization_type = 'dynamic'; % 'dynamic' or 'static'
 ref_slice = [];                 % Reference slice ([] for interactive selection)
@@ -94,7 +92,7 @@ LOGcomment = sprintf("SNR=%g, N_obs=%d, resolution=%d, density=%g, slices=%d", .
     SNR, N_obs, observation_resolution, defect_density, num_slices);
 LOGcomment = logUsedBlocks(LOGpath, LOGfile, "GD01A", LOGcomment, 0);
 
-% Generate synthetic data (compact 1-line function call)
+% Generate synthetic data
 fprintf('Generating synthetic test data...\n');
 [data, params] = generateSyntheticData(...
     'SNR', SNR, 'N_obs', N_obs, 'observation_resolution', observation_resolution, ...
@@ -117,13 +115,13 @@ clearvars vis_generation normalization_type ref_slice
 %% =========================================================================
 %% IN01A: Initialize-kNernel-01-A; Initialize Kernels for Reference Slice
 %  =========================================================================
-%  Edited by Dong Chen, 2025-10-27
+%  Edited by Dong Chen, 2025-10-28
 %
 %  Interactive kernel initialization from the reference slice observation.
 %  User selects regions containing isolated defect patterns to use as
 %  initial kernel guesses.
 %
-%  Dependencies: initialize_kernels.m, apply_window.m
+%  Dependencies: initializeKernelsRef.m
 
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
@@ -138,75 +136,44 @@ window_type = {'gaussian', 2.5};        % Window function for kernels
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % LOG: Block start
-LOGcomment = sprintf("Selection: %s, Window: %s", kernel_selection_type, mat2str(window_type));
+LOGcomment = sprintf("Selection: %s, Window: %s", kernel_selection_type, formatWindowType(window_type));
 LOGcomment = logUsedBlocks(LOGpath, LOGfile, "IN01A", LOGcomment, 0);
 
-% Get kernel sizes for reference slice (temporary for this block)
-kernel_sizes_ref_temp = reshape(params.kernel_sizes(params.ref_slice,:,:), [params.num_kernels, 2]);
-
-% Display ground truth kernels
-figure('Name', 'IN01A: Ground Truth Kernels');
-for k = 1:params.num_kernels
-    subplot(1, params.num_kernels, k);
-    imagesc(A0{params.ref_slice, k});
-    axis square;
-    title(sprintf('True Kernel %d', k));
-    colorbar;
-end
-sgtitle('Ground Truth Kernels (Reference Slice)');
-
-% Initialize kernels interactively
-fprintf('Initializing kernels for reference slice...\n');
-fprintf('Please select %d kernel regions from the observation.\n', params.num_kernels);
-A1 = initialize_kernels(Y_ref, params.num_kernels, kernel_sizes_ref_temp, kernel_selection_type, window_type);
-
-% Display initialized kernels
-figure('Name', 'IN01A: Initialized Kernels');
-for n = 1:params.num_kernels
-    subplot(1, params.num_kernels, n);
-    imagesc(A1{n});
-    title(sprintf('Initial Kernel %d', n));
-    colorbar;
-    axis square;
-end
-sgtitle('Initialized Kernels (Reference Slice)');
-
-fprintf('Kernel initialization complete.\n\n');
+% Initialize kernels (GT shown for 'selected' mode, initialized always shown)
+[data, params] = initializeKernelsRef(data, params, ...
+    'kernel_selection_type', kernel_selection_type, ...
+    'window_type', window_type);
 
 % LOG: Initialization complete
-LOGcomment = sprintf("Initialized %d kernels, sizes: %s", params.num_kernels, mat2str(kernel_sizes_ref_temp));
+LOGcomment = sprintf("Initialized %d kernels, sizes: %s", params.num_kernels, mat2str(params.kernel_sizes_ref));
 LOGcomment = logUsedBlocks(LOGpath, LOGfile, "  ^  ", LOGcomment, 0);
 
 % Clear preset variables
-clearvars kernel_selection_type window_type kernel_sizes_ref_temp n k
+clearvars kernel_selection_type window_type
 
 
 %% =========================================================================
 %% DS01A: Decompose-Slice-01-A; Decompose Reference Slice
 %  =========================================================================
-%  Edited by Dong Chen, 2025-10-27
+%  Edited by Dong Chen, 2025-10-28
 %
 %  Runs the MT-SBD algorithm on the reference slice to find optimal
 %  activation maps and refine kernel estimates. This provides the starting
 %  point for multi-slice analysis.
 %
-%  Dependencies: MTSBD_synthetic.m, Asolve_Manopt_tunable.m, 
-%                Xsolve_FISTA_tunable.m, computeQualityMetrics.m, showims.m
+%  Dependencies: decomposeReferenceSlice.m
 
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
-% Algorithm selection
-use_Xregulated = false;         % true: MTSBD_Xregulated, false: MTSBD_synthetic
-
 % Phase I settings
 initial_iteration = 1;          % Manopt/FISTA inner iterations (start)
 maxIT = 15;                     % Number of outer alternating iterations
-lambda1 = [3e-2, 3e-2, 3e-2, 3e-2];  % L1 regularization (Phase I)
+lambda1 = 3e-2;                 % L1 regularization (Phase I) - scalar or vector
 
 % Phase II settings (refinement)
 phase2_enable = false;          % Enable Phase II refinement
-lambda2 = [1e-2, 1e-2, 1e-2, 1e-2];  % L1 regularization (Phase II final)
+lambda2 = 1e-2;                 % L1 regularization (Phase II final) - scalar or vector
 nrefine = 5;                    % Number of refinement steps
 kplus_factor = 0.5;             % Sphere lifting padding factor
 
@@ -215,7 +182,6 @@ signflip_threshold = 0.2;       % Sign flip detection threshold
 xpos = true;                    % Enforce positive activations
 getbias = true;                 % Extract constant bias term
 Xsolve_method = 'FISTA';        % 'FISTA' or 'pdNCG'
-gamma_crosscorr = 5e-2;         % Cross-correlation regularization
 
 % Initialization options
 use_xinit = [];                 % Initial X guess ([] for none)
@@ -226,86 +192,36 @@ show_progress = true;           % Show progress during optimization
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % LOG: Block start
-LOGcomment = sprintf("Method: %s, maxIT=%d, lambda1=%s, phase2=%d", ...
-    iif(use_Xregulated, 'Xregulated', 'standard'), maxIT, mat2str(lambda1), phase2_enable);
+LOGcomment = sprintf("maxIT=%d, lambda1=%g, phase2=%d", maxIT, lambda1, phase2_enable);
 LOGcomment = logUsedBlocks(LOGpath, LOGfile, "DS01A", LOGcomment, 0);
 
-% Set up display functions for monitoring
-if show_progress
-    figure('Name', 'DS01A: Decomposition Progress');
-    dispfun = cell(1, num_kernels);
-    for n = 1:num_kernels
-        dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_ref, A1{n}, X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
-    end
-else
-    dispfun = cell(1, num_kernels);
-    for n = 1:num_kernels
-        dispfun{n} = @(Y, A, X, kernel_sizes, kplus) 0;
-    end
-end
+% Decompose reference slice
+fprintf('Decomposing reference slice...\n');
+[data, params, ref_results] = decomposeReferenceSlice(data, params, ...
+    'initial_iteration', initial_iteration, ...
+    'maxIT', maxIT, ...
+    'lambda1', lambda1, ...
+    'phase2_enable', phase2_enable, ...
+    'lambda2', lambda2, ...
+    'nrefine', nrefine, ...
+    'kplus_factor', kplus_factor, ...
+    'signflip_threshold', signflip_threshold, ...
+    'xpos', xpos, ...
+    'getbias', getbias, ...
+    'Xsolve_method', Xsolve_method, ...
+    'use_xinit', use_xinit, ...
+    'show_progress', show_progress);
 
-% Package parameters
-kernel_sizes_ref = reshape(kernel_sizes(params.ref_slice,:,:), [num_kernels, 2]);
-sbd_params = struct();
-sbd_params.lambda1 = lambda1;
-sbd_params.phase2 = phase2_enable;
-sbd_params.kplus = ceil(kplus_factor * kernel_sizes_ref);
-sbd_params.lambda2 = lambda2;
-sbd_params.nrefine = nrefine;
-sbd_params.signflip = signflip_threshold;
-sbd_params.xpos = xpos;
-sbd_params.getbias = getbias;
-sbd_params.Xsolve = Xsolve_method;
-sbd_params.X0 = X0_ref;
-sbd_params.A0 = A0_ref;
-sbd_params.xinit = use_xinit;
-sbd_params.gamma = gamma_crosscorr;
-
-% Run SBD on reference slice
-fprintf('Running MT-SBD decomposition on reference slice %d...\n', params.ref_slice);
-fprintf('Method: %s\n', iif(use_Xregulated, 'X-regularized', 'Standard'));
-fprintf('Max iterations: %d\n', maxIT);
-tic;
-
-if use_Xregulated
-    [A_ref, X_ref, bout, extras] = MTSBD_synthetic_Xregulated(...
-        Y_ref, kernel_sizes_ref, sbd_params, dispfun, A1, initial_iteration, maxIT);
-else
-    [A_ref, X_ref, bout, extras] = MTSBD_synthetic(...
-        Y_ref, kernel_sizes_ref, sbd_params, dispfun, A1, initial_iteration, maxIT);
-end
-
-decomp_time = toc;
-fprintf('Decomposition completed in %.2f seconds.\n', decomp_time);
-
-% Store reference results
-ref_results = struct();
-ref_results.A = A_ref;
-ref_results.X = X_ref;
-ref_results.b = bout;
-ref_results.extras = extras;
-ref_results.params = sbd_params;
-
-% Display final quality metrics
-fprintf('\nFinal Quality Metrics:\n');
-final_metrics = extras.phase1.activation_metrics(end,:);
-final_kernel_quality = extras.phase1.kernel_quality_factors(end,:);
-for k = 1:num_kernels
-    fprintf('  Kernel %d - Activation: %.4f, Quality: %.4f\n', ...
-        k, final_metrics(k), final_kernel_quality(k));
-end
-fprintf('\n');
-
-% LOG: Decomposition results
+% LOG: MTSBD results
 LOGcomment = sprintf("Completed in %.2fs, Final metrics: Act=%s, Qual=%s", ...
-    decomp_time, mat2str(final_metrics, 3), mat2str(final_kernel_quality, 3));
+    ref_results.mtsbd_time, mat2str(ref_results.final_metrics, 3), ...
+    mat2str(ref_results.final_kernel_quality, 3));
 LOGcomment = logUsedBlocks(LOGpath, LOGfile, "  ^  ", LOGcomment, 0);
 
 % Clear preset variables
-clearvars use_Xregulated initial_iteration maxIT lambda1 phase2_enable lambda2
+clearvars initial_iteration maxIT lambda1 phase2_enable lambda2
 clearvars nrefine kplus_factor signflip_threshold xpos getbias Xsolve_method
-clearvars gamma_crosscorr use_xinit show_progress dispfun sbd_params
-clearvars kernel_sizes_ref decomp_time final_metrics final_kernel_quality k n
+clearvars use_xinit show_progress
 
 
 %% =========================================================================
@@ -655,9 +571,6 @@ clearvars kernel_centers target_sizes_slice s k
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
-% Algorithm selection
-use_Xregulated_allslice = false;    % Use X-regularized version
-
 % Use reference slice results as initialization
 use_reference_init = true;          % Initialize X with reference results
 
@@ -670,8 +583,7 @@ maxIT_allslice = 15;                % Max iterations for all-slice decomposition
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % LOG: Block start
-LOGcomment = sprintf("Method: %s, Init from ref: %d, maxIT=%d", ...
-    iif(use_Xregulated_allslice, 'Xregulated', 'standard'), use_reference_init, maxIT_allslice);
+LOGcomment = sprintf("Init from ref: %d, maxIT=%d", use_reference_init, maxIT_allslice);
 LOGcomment = logUsedBlocks(LOGpath, LOGfile, "DA01A", LOGcomment, 0);
 
 fprintf('Running MT-SBD decomposition on all %d slices...\n', num_slices);
@@ -715,13 +627,8 @@ end
 
 % Run all-slice decomposition
 tic;
-if use_Xregulated_allslice
-    [Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_synthetic_Xregulated_all_slices(...
-        Y_used, kernel_sizes_used, params_allslice, dispfun_allslice, A1_used, initial_iteration, maxIT_allslice);
-else
-    [Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_synthetic_all_slice(...
-        Y_used, kernel_sizes_used, params_allslice, dispfun_allslice, A1_used, initial_iteration, maxIT_allslice);
-end
+[Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_synthetic_all_slice(...
+    Y_used, kernel_sizes_used, params_allslice, dispfun_allslice, A1_used, initial_iteration, maxIT_allslice);
 allslice_time = toc;
 
 fprintf('All-slice decomposition completed in %.2f seconds.\n', allslice_time);
@@ -741,8 +648,8 @@ LOGcomment = sprintf("Completed in %.2fs for %d slices", allslice_time, num_slic
 LOGcomment = logUsedBlocks(LOGpath, LOGfile, "  ^  ", LOGcomment, 0);
 
 % Clear preset variables
-clearvars use_Xregulated_allslice use_reference_init show_allslice_progress
-clearvars maxIT_allslice kernel_sizes_used Y_used A1_used dispfun_allslice
+clearvars use_reference_init show_allslice_progress maxIT_allslice
+clearvars kernel_sizes_used Y_used A1_used dispfun_allslice
 clearvars params_allslice b_temp allslice_time n k
 
 
@@ -906,13 +813,3 @@ fprintf('Log file: %s_LOGfile.txt\n\n', LOGfile);
 %% =========================================================================
 %% HELPER FUNCTIONS
 %  =========================================================================
-
-function out = iif(condition, true_val, false_val)
-    % Inline if function for cleaner conditional expressions
-    if condition
-        out = true_val;
-    else
-        out = false_val;
-    end
-end
-

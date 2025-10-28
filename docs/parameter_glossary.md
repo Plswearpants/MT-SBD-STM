@@ -49,12 +49,18 @@
 ## Kernel Initialization Parameters
 
 ### Block: IN01A (Initialize-kNernel-01-A)
-### Function: `initialize_kernels.m`
+### Function: `initializeKernelsRef.m`
 
 | Parameter | Type | Units | Range | Default | Description |
 |-----------|------|-------|-------|---------|-------------|
 | **kernel_selection_type** | string | - | {'selected', 'random'} | 'selected' | Method for initial kernel selection. 'selected' = interactive, 'random' = random initialization |
 | **window_type** | cell/string | - | see below | {'gaussian', 2.5} | Window function applied to kernels to reduce edge effects |
+
+#### Derived/Output Parameters
+
+| Parameter | Type | Units | Description |
+|-----------|------|-------|-------------|
+| **kernel_sizes_ref** | array [K×2] | pixels | Kernel sizes for reference slice: [num_kernels × (height, width)] |
 
 #### Window Type Options:
 - `'hann'` - Hann window (raised cosine)
@@ -69,13 +75,11 @@
 ## Decomposition Parameters
 
 ### Block: DS01A (Decompose-Slice-01-A)
-### Functions: `MTSBD_synthetic.m`, `Asolve_Manopt_tunable.m`, `Xsolve_FISTA_tunable.m`
+### Function: `decomposeReferenceSlice.m`
 
-#### Algorithm Selection
-
-| Parameter | Type | Units | Range | Default | Description |
-|-----------|------|-------|-------|---------|-------------|
-| **use_Xregulated** | logical | - | {true, false} | false | Use X-regularized version with cross-correlation penalty |
+#### Notes
+- Lambda parameters can be specified as scalars (applied to all kernels) or vectors (per-kernel values)
+- The wrapper auto-sizes lambda vectors to match num_kernels if scalar provided
 
 #### Phase I Settings (Initial Decomposition)
 
@@ -83,14 +87,14 @@
 |-----------|------|-------|-------|---------|-------------|
 | **initial_iteration** | integer | iterations | ≥ 1 | 1 | Number of inner solver iterations at start. Increases gradually |
 | **maxIT** | integer | iterations | > 0 | 15 | Maximum number of outer alternating iterations |
-| **lambda1** | vector [K×1] | - | > 0 | [3e-2, ...] | L1 regularization parameter for Phase I (per kernel). Controls sparsity |
+| **lambda1** | scalar/vector | - | > 0 | 3e-2 | L1 regularization for Phase I. Scalar applies to all kernels, or per-kernel vector |
 
 #### Phase II Settings (Refinement - Optional)
 
 | Parameter | Type | Units | Range | Default | Description |
 |-----------|------|-------|-------|---------|-------------|
 | **phase2_enable** | logical | - | {true, false} | false | Enable Phase II refinement with sphere lifting |
-| **lambda2** | vector [K×1] | - | > 0 | [1e-2, ...] | Final L1 regularization for Phase II (per kernel) |
+| **lambda2** | scalar/vector | - | > 0 | 1e-2 | Final L1 regularization for Phase II. Scalar applies to all kernels, or per-kernel vector |
 | **nrefine** | integer | steps | ≥ 1 | 5 | Number of refinement steps. Lambda decreases from lambda1 to lambda2 |
 | **kplus_factor** | float | - | > 0 | 0.5 | Sphere lifting padding factor: `kplus = kplus_factor × kernel_size` |
 
@@ -102,8 +106,8 @@
 | **xpos** | logical | - | {true, false} | true | Enforce non-negative constraint on activations X |
 | **getbias** | logical | - | {true, false} | true | Extract constant bias term from observation |
 | **Xsolve_method** | string | - | {'FISTA', 'pdNCG'} | 'FISTA' | Solver for activation map X. FISTA = Fast Iterative Shrinkage-Thresholding |
-| **gamma_crosscorr** | float | - | > 0 | 5e-2 | Cross-correlation regularization parameter (only if use_Xregulated = true) |
 | **use_xinit** | struct/[] | - | - | [] | Initial guess for X. Empty = start from scratch |
+| **show_progress** | logical | - | {true, false} | true | Display optimization progress during decomposition |
 
 #### Quality Metrics (Output)
 
@@ -198,13 +202,22 @@
 Output from wrapper functions containing all data arrays:
 
 ```matlab
+% After GD01A (Generate Data)
 data.Y              % [H × W × S] - Normalized observation
-data.A0             % {S × K} - Noisy kernels cell array
-data.A0_noiseless   % {S × K} - Noiseless kernels cell array
+data.A0             % {S × K} - Noisy kernels cell array (ground truth)
+data.A0_noiseless   % {S × K} - Noiseless kernels cell array (ground truth)
 data.X0             % [H × W × K] - Ground truth activations
 data.Y_ref          % [H × W] - Reference slice observation
 data.X0_ref         % [H × W × K] - Reference activations
-data.A0_ref         % {1 × K} - Reference kernels
+data.A0_ref         % {1 × K} - Reference kernels (ground truth)
+
+% After IN01A (Initialize Kernels)
+data.A1             % {1 × K} - Initialized kernels for reference slice
+
+% After DS01A (Decompose Reference Slice)
+data.A_ref          % {1 × K} - Decomposed/refined kernels for reference slice
+data.X_ref          % [H × W × K] - Activation maps for reference slice
+data.b_ref          % [K × 1] - Bias terms for each kernel
 ```
 
 Where:
@@ -279,6 +292,11 @@ extras.normA                        % Kernel normalizations
 ---
 
 ## Version History
+
+- **v1.1** (2025-10-27): Updated IN01A block
+  - Added `show_ground_truth` and `show_initialized` parameters
+  - Updated to use `initializeKernelsRef` wrapper function
+  - Clarified kernel_sizes_ref output in params
 
 - **v1.0** (2025-10-27): Initial glossary
   - Documented GD01A (Data Generation) parameters

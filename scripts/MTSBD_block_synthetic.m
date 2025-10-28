@@ -1,6 +1,6 @@
 %% Block 1: Generate Test Data and Initialize Kernels
 % Generate test set
-SNR = 5;              % Signal-to-noise ratio
+SNR = 2;              % Signal-to-noise ratio
 N_obs = 50;           % Observation lattice size 
 observation_resolution = 3;  % Resolution: 3 pixels per lattice site
 defect_density = 0.01;    
@@ -127,8 +127,6 @@ else
     ref_results.X = X_ref;
     ref_results.extras = extras;
 end
-
-
 
 %% Block 3: Find Most Isolated Points and Initialize Kernels
 fprintf('Calculating isolation scores and finding most isolated points...\n');
