@@ -9,3 +9,6 @@ DATE and TIME         BLOCK   COMMENT
 28-Oct-2025 15:13:43  DS01A   maxIT=15, lambda1=0.03, phase2=0
 28-Oct-2025 15:14:33  DS01A   maxIT=15, lambda1=0.03, phase2=0
 28-Oct-2025 15:15:27    ^     Completed in 54.90s, Final metrics: Act=[0.0492 0.759], Qual=[0.307 0.909]
+29-Oct-2025 10:03:30  IS01A   Threshold factor=10, Size type=kernel_sizes_all
+29-Oct-2025 10:06:41  IS01A   Threshold factor=10, Size type=kernel_sizes_all
+29-Oct-2025 10:06:42    ^     Found 2 isolated points, offsets: [-53 -31;-1 0]

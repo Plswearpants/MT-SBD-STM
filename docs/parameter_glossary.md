@@ -121,26 +121,41 @@
 ## Isolation Analysis Parameters
 
 ### Block: IS01A (Isolation-Selection-01-A)
-### Function: TBD (to be wrapped)
+### Function: `findIsolatedPoints.m`
 
 | Parameter | Type | Units | Range | Default | Description |
 |-----------|------|-------|-------|---------|-------------|
 | **isolation_threshold_factor** | float | - | > 1 | 10 | Defect detection threshold: `threshold = max_activation / factor` |
 | **target_kernel_size_type** | string | - | see below | 'kernel_sizes_all' | Method for determining target kernel sizes across slices |
+| **show_distributions** | logical | - | {true, false} | true | Display activation value distribution histograms and CDFs |
+| **show_isolation_maps** | logical | - | {true, false} | true | Display isolation analysis visualizations |
 
 #### Target Kernel Size Options:
 - `'ref_kernel_sizes'` - Use reference slice kernel sizes for all slices
 - `'kernel_sizes_cap'` - Use maximum kernel size across all slices
-- `'kernel_sizes_all'` - Use slice-specific kernel sizes
+- `'kernel_sizes_all'` - Use slice-specific kernel sizes (maintains energy dependence)
 
 #### Derived/Output Parameters
 
 | Parameter | Type | Units | Description |
 |-----------|------|-------|-------------|
-| **most_isolated_points** | cell {1×K} | pixels | Coordinates [y, x] of most isolated defect for each kernel |
-| **isolation_scores** | cell {1×K} | pixels² | Squared distance to nearest other-kernel defect |
-| **defect_positions** | cell {1×K} | pixels | All detected defect positions [N×2] for each kernel |
-| **num_defects** | vector [1×K] | - | Number of defects detected per kernel |
+| **kernel_centers** | array [K×2] | pixels | Most isolated point for each kernel: [y, x] coordinates |
+| **target_kernel_sizes** | array | pixels | Kernel sizes for 3D initialization (depends on size type) |
+| **A0_used** | cell | - | Ground truth kernels padded to target sizes if needed |
+
+#### Isolation Results Struct
+
+Contains detailed analysis results:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| **defect_positions** | cell {1×K} | All detected defect positions [N×2] above threshold per kernel |
+| **most_isolated_points** | cell {1×K} | Most isolated point [y, x] per kernel (cell format) |
+| **used_most_isolated_points** | cell {1×K} | Isolated points aligned with ground truth |
+| **isolation_scores** | cell {1×K} | Distance-based isolation scores for detected defects |
+| **num_defects** | vector [1×K] | Number of defects detected per kernel |
+| **offset** | array [K×2] | Alignment offset from ground truth activation maps |
+| **kernel_centers** | array [K×2] | Centers in matrix format (same as data.kernel_centers) |
 
 ---
 
@@ -218,6 +233,10 @@ data.A1             % {1 × K} - Initialized kernels for reference slice
 data.A_ref          % {1 × K} - Decomposed/refined kernels for reference slice
 data.X_ref          % [H × W × K] - Activation maps for reference slice
 data.b_ref          % [K × 1] - Bias terms for each kernel
+
+% After IS01A (Find Isolated Points)
+data.kernel_centers % [K × 2] - Most isolated points [y, x] for each kernel
+data.A0_used        % {S × K} - Ground truth kernels (padded if needed for 3D)
 ```
 
 Where:
@@ -288,6 +307,58 @@ extras.normA                        % Kernel normalizations
 - **maxIT ∝ num_kernels**: More kernels may need more iterations
 - **kplus_factor × kernel_size**: Should be < min(H,W)/4 to avoid boundary issues
 - **defect_density × N_obs²**: Total defects ≈ this product
+
+---
+
+## Workspace Management Parameters
+
+### Block: WS01A (Workspace-Save-01-A)
+### Functions: `saveDataset.m`, `saveRun.m`, `autoSave.m`
+
+**Design**: Always executes when reached - no enable flag needed. Comment out block to skip.
+
+**Note**: `saveWorkspace.m` has been removed. Use `saveDataset.m` (pre-run) or `saveRun.m` (post-run) instead. `autoSave.m` automatically selects the appropriate function based on workflow phase.
+
+**Automatic Saving**: The workflow uses structured saves:
+- **Pre-run phase**: `saveDataset.m` saves to `project/<dataset>/<dataset>.mat`
+- **Post-run phase**: `saveRun.m` saves to `project/<dataset>/runXX/runXX.mat`
+- **Auto-save**: `autoSave.m` automatically calls the correct function
+
+See `saveDataset.m` and `saveRun.m` documentation for details.
+
+### Block: WL01A (Workspace-Load-01-A)
+### Function: `loadWorkspace.m`
+
+**Design**: Always executes when reached - no enable flag needed. Comment out block to skip.
+
+**Memory Protection**: Always prompts user before overwriting current workspace in memory.
+
+| Parameter | Type | Units | Range | Default | Description |
+|-----------|------|-------|-------|---------|-------------|
+| **workspace_dir** | string | - | valid path | '' (UI selection) | Directory containing workspace. Empty = interactive folder picker |
+| **verify_log_file** | logical | - | {true, false} | true | Verify log file naming convention matches |
+
+#### Loading Behavior
+
+1. **Directory Selection**: UI dialog if `workspace_dir` empty
+2. **File Detection**: Automatically finds .mat file in directory
+3. **Naming Validation**: Verifies `<name>.mat` and `<name>_LOGfile.txt` match
+4. **Collision Handling**: If current workspace has same name, prompts user:
+   - Save current workspace first (recommended)
+   - Rename and save current workspace
+   - Delete current workspace (with confirmation)
+   - Cancel load operation
+
+#### Naming Convention (Enforced)
+
+**Required Structure**:
+```
+workspace_directory/
+  ├─ experiment_001.mat          ← Workspace file
+  └─ experiment_001_LOGfile.txt  ← Log file (MUST match name)
+```
+
+**Error**: If log file name doesn't match, load will fail with clear error message
 
 ---
 

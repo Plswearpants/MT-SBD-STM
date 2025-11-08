@@ -1,5 +1,6 @@
-function [data, params] = generateSyntheticData(varargin)
+function [data, params] = generateSyntheticData(log, params)
 %GENERATESYNTHETICDATA Wrapper function for synthetic data generation
+%   Now includes internal logging
 %
 %   Complete workflow for generating synthetic STM data including:
 %   - 1. Data generation from LDoS simulations
@@ -7,120 +8,105 @@ function [data, params] = generateSyntheticData(varargin)
 %   - 3. Reference slice selection
 %   - 4. Data extraction and organization
 %
-%   INPUTS (Name-Value pairs):
-%       REQUIRED (will prompt if not provided):
-%       'SNR'                   - Signal-to-noise ratio
-%       'N_obs'                 - Observation lattice size
-%       'observation_resolution' - Pixels per lattice site
-%       'defect_density'        - Surface defect density (0-1)
-%       'num_slices'            - Number of energy slices
-%       'LDoS_path'             - Path to LDoS data file
+%   INPUTS:
+%       log                 - Log struct with .path and .file fields
+%       params              - Parameter struct (hierarchical) with fields:
+%
+%       REQUIRED (in params.synGen):
+%       .SNR                - Signal-to-noise ratio
+%       .N_obs              - Observation lattice size
+%       .observation_resolution - Pixels per lattice site
+%       .defect_density     - Surface defect density (0-1)
+%       .num_slices         - Number of energy slices
+%       .LDoS_path          - Path to LDoS data file
 %
 %       OPTIONAL (have defaults):
-%       'vis_generation'        - Show intermediate steps (default: false)
-%       'normalization_type'    - 'dynamic' or 'static' (default: 'dynamic')
-%       'ref_slice'             - Reference slice number (default: [] for interactive)
+%       .vis_generation     - Show intermediate steps (default: false)
+%       .normalization_type - 'dynamic' or 'static' (default: 'dynamic')
+%       .ref_slice          - Reference slice number (default: [] for interactive)
 %
 %   OUTPUTS:
-%       data            - Structure containing all data arrays:
-%           .Y              - Normalized 3D observation [H x W x num_slices]
-%           .A0             - Noisy kernels cell array {num_slices x num_kernels}
-%           .A0_noiseless   - Noiseless kernels cell array {num_slices x num_kernels}
-%           .X0             - Ground truth activations [H x W x num_kernels]
-%           .Y_ref          - Reference slice observation [H x W]
-%           .X0_ref         - Reference slice activations (same as X0)
-%           .A0_ref         - Reference slice kernels {1 x num_kernels}
+%       data            - Structure containing synthetic generation data:
+%           .synGen.Y              - Normalized 3D observation [H x W x num_slices]
+%           .synGen.A0             - Noisy kernels cell array {num_slices x num_kernels}
+%           .synGen.A0_noiseless   - Noiseless kernels cell array {num_slices x num_kernels}
+%           .synGen.X0             - Ground truth activations [H x W x num_kernels]
+%           .synGen.Y_ref          - Reference slice observation [H x W]
+%           .synGen.X0_ref         - Reference slice activations (same as X0)
+%           .synGen.A0_ref         - Reference slice kernels {1 x num_kernels}
 %
-%       params          - Structure containing all parameters (1D scalars/strings):
-%           .SNR, .N_obs, .observation_resolution, .defect_density
-%           .num_slices, .num_kernels, .ref_slice, etc.
+%       params          - Structure containing all parameters (hierarchical for storage):
+%           .synGen.SNR, .N_obs, .observation_resolution, .defect_density
+%           .synGen.num_slices, .num_kernels, .ref_slice, .kernel_sizes, etc.
+%           Note: Organized into hierarchical structure via organizeParams()
 %
 %   EXAMPLE:
-%       [data, params] = generateSyntheticData(...
-%           'SNR', 5, 'N_obs', 50, 'num_slices', 2, ...
-%           'LDoS_path', 'LDoS_single_defects_self=0.6_save.mat');
-%       Y = data.Y;
-%       A0 = data.A0;
+%       % Set parameters in hierarchical structure
+%       params.synGen.SNR = 5;
+%       params.synGen.N_obs = 50;
+%       params.synGen.num_slices = 2;
+%       params.synGen.LDoS_path = 'LDoS_single_defects_self=0.6_save.mat';
+%       [data, params] = generateSyntheticData(log, params);
+%       Y = data.synGen.Y;
+%       A0 = data.synGen.A0;
 %
 %   See also: properGen_full, normalizeBackgroundToZeroMean3D, proj2oblique
 
-    % Parse input arguments
-    p = inputParser;
-    % Required parameters (user must provide or will be prompted)
-    addParameter(p, 'SNR', [], @(x) isempty(x) || isnumeric(x));
-    addParameter(p, 'N_obs', [], @(x) isempty(x) || isnumeric(x));
-    addParameter(p, 'observation_resolution', [], @(x) isempty(x) || isnumeric(x));
-    addParameter(p, 'defect_density', [], @(x) isempty(x) || isnumeric(x));
-    addParameter(p, 'num_slices', [], @(x) isempty(x) || isnumeric(x));
-    addParameter(p, 'LDoS_path', '', @ischar);
-    % Optional parameters (have defaults)
-    addParameter(p, 'vis_generation', false, @islogical);
-    addParameter(p, 'normalization_type', 'dynamic', @ischar);
-    addParameter(p, 'ref_slice', [], @isnumeric);
-    parse(p, varargin{:});
-    
-    % Store all input parameters in params struct
-    params = struct();
-    
-    % Handle required parameters - prompt if not provided
-    if isempty(p.Results.SNR)
-        params.SNR = input('Enter SNR (Signal-to-Noise Ratio): ');
-        if isempty(params.SNR) || ~isnumeric(params.SNR) || params.SNR <= 0
-            error('SNR must be a positive number');
-        end
-    else
-        params.SNR = p.Results.SNR;
+    % Validate required inputs
+    if ~isstruct(log) || ~isfield(log, 'path') || ~isfield(log, 'file')
+        error('log must be a struct with .path and .file fields');
+    end
+    if ~isstruct(params)
+        error('params must be a struct');
     end
     
-    if isempty(p.Results.N_obs)
-        params.N_obs = input('Enter N_obs (Observation lattice size): ');
-        if isempty(params.N_obs) || ~isnumeric(params.N_obs) || params.N_obs <= 0
-            error('N_obs must be a positive integer');
-        end
-    else
-        params.N_obs = p.Results.N_obs;
+    % Extract params from hierarchical structure (if needed)
+    if isfield(params, 'synGen')
+        params = organizeParams(params, 'extract');
     end
     
-    if isempty(p.Results.observation_resolution)
-        params.observation_resolution = input('Enter observation_resolution (Pixels per lattice site): ');
-        if isempty(params.observation_resolution) || ~isnumeric(params.observation_resolution) || params.observation_resolution <= 0
-            error('observation_resolution must be a positive integer');
+    % Read required parameters from params struct (all required, no defaults)
+    required_fields = {'SNR', 'N_obs', 'observation_resolution', 'defect_density', ...
+                       'num_slices', 'LDoS_path'};
+    for i = 1:length(required_fields)
+        field = required_fields{i};
+        if ~isfield(params, field)
+            error('Parameter "%s" is required in params struct.', field);
         end
-    else
-        params.observation_resolution = p.Results.observation_resolution;
+        if isempty(params.(field))
+            error('Parameter "%s" cannot be empty.', field);
+        end
     end
     
-    if isempty(p.Results.defect_density)
-        params.defect_density = input('Enter defect_density (0-1): ');
-        if isempty(params.defect_density) || ~isnumeric(params.defect_density) || params.defect_density <= 0 || params.defect_density >= 1
-            error('defect_density must be between 0 and 1');
-        end
-    else
-        params.defect_density = p.Results.defect_density;
+    % Validate required parameters
+    if ~isnumeric(params.SNR) || params.SNR <= 0
+        error('SNR must be a positive number');
+    end
+    if ~isnumeric(params.N_obs) || params.N_obs <= 0
+        error('N_obs must be a positive integer');
+    end
+    if ~isnumeric(params.observation_resolution) || params.observation_resolution <= 0
+        error('observation_resolution must be a positive integer');
+    end
+    if ~isnumeric(params.defect_density) || params.defect_density <= 0 || params.defect_density >= 1
+        error('defect_density must be between 0 and 1');
+    end
+    if ~isnumeric(params.num_slices) || params.num_slices <= 0
+        error('num_slices must be a positive integer');
+    end
+    if ~ischar(params.LDoS_path) && ~isstring(params.LDoS_path)
+        error('LDoS_path must be a string');
     end
     
-    if isempty(p.Results.num_slices)
-        params.num_slices = input('Enter num_slices (Number of energy slices): ');
-        if isempty(params.num_slices) || ~isnumeric(params.num_slices) || params.num_slices <= 0
-            error('num_slices must be a positive integer');
-        end
-    else
-        params.num_slices = p.Results.num_slices;
-    end
+    % Read optional parameters with defaults
+    if isfield(params, 'vis_generation'), vis_generation = params.vis_generation; else, vis_generation = false; end
+    if isfield(params, 'normalization_type'), normalization_type = params.normalization_type; else, normalization_type = 'dynamic'; end
+    if isfield(params, 'ref_slice'), ref_slice_input = params.ref_slice; else, ref_slice_input = []; end
     
-    if isempty(p.Results.LDoS_path)
-        params.LDoS_path = input('Enter LDoS_path (Path to LDoS data file): ', 's');
-        if isempty(params.LDoS_path)
-            error('LDoS_path is required');
-        end
-    else
-        params.LDoS_path = p.Results.LDoS_path;
-    end
-    
-    % Optional parameters with defaults
-    params.vis_generation = p.Results.vis_generation;
-    params.normalization_type = p.Results.normalization_type;
-    params.ref_slice_input = p.Results.ref_slice;  % Store user input
+    % Store in params struct for internal use (flat structure)
+    params.vis_generation = vis_generation;
+    params.normalization_type = normalization_type;
+    params.ref_slice_input = ref_slice_input;  % Store user input
     
     % Generate synthetic data
     fprintf('  Generating synthetic data...\n');
@@ -198,7 +184,7 @@ function [data, params] = generateSyntheticData(varargin)
     colormap(gray);
     
     % Organize outputs into data and params structs
-    % DATA struct: all multi-dimensional arrays
+    % DATA struct: Store flat internally (will convert to hierarchical at end)
     data = struct();
     data.Y = Y;
     data.A0 = gen_params.A0;
@@ -208,9 +194,21 @@ function [data, params] = generateSyntheticData(varargin)
     data.X0_ref = X0_ref;
     data.A0_ref = A0_ref;
     
-    % PARAMS struct already contains all parameters (1D scalars/strings)
-    % Remove temporary field
+    % PARAMS struct: Remove temporary field first
     params = rmfield(params, 'ref_slice_input');
+    
+    % LOG: Generation details
+    LOGcomment = sprintf("SNR=%g, N_obs=%d, resolution=%d, density=%g, slices_chosen= %d, slices=%d", ...
+        params.SNR, params.N_obs, params.observation_resolution, params.defect_density, params.num_slices);
+    LOGcomment = logUsedBlocks(log.path, log.file, "GD01A", LOGcomment, 0);
+    
+    LOGcomment = sprintf("Generated Y: %dx%dx%d, Kernels: %d, Ref slice: %d", ...
+        size(data.Y,1), size(data.Y,2), size(data.Y,3), params.num_kernels, params.ref_slice);
+    LOGcomment = logUsedBlocks(log.path, log.file, "  ^  ", LOGcomment, 0);
+    
+    % Convert data and params to hierarchical structure for storage
+    data = organizeData(data, 'write');
+    params = organizeParams(params, 'write');
     
     fprintf('  Data generation complete.\n');
 end

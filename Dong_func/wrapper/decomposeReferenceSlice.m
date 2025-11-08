@@ -1,13 +1,14 @@
-function [data, params, results] = decomposeReferenceSlice(data, params, varargin)
+function [data, params] = decomposeReferenceSlice(log, data, params, varargin)
 %DECOMPOSEREFERENCESLICE Wrapper for MT-SBD on reference slice
 %
 %   Multi-kernel Tensor Shifted Blind Deconvolution for reference slice
 %
-%   [data, params, results] = decomposeReferenceSlice(data, params, ...)
+%   [data, params, results] = decomposeReferenceSlice(log, data, params, ...)
 %
 %   INPUTS:
+%       log                 - Log struct with .path and .file fields
 %       data                - Data struct from previous blocks
-%       params              - Parameter struct from previous blocks
+%       params              - Parameter struct from previous blocks (hierarchical or flat)
 %
 %       OPTIONAL (Name-Value pairs):
 %       Phase I settings:
@@ -34,18 +35,16 @@ function [data, params, results] = decomposeReferenceSlice(data, params, varargi
 %       'show_progress'     - Show MT-SBD optimization progress (default: true)
 %
 %   OUTPUTS:
-%       data                - Updated data struct with new fields:
-%                             data.A_ref  - Deconvolved kernels
-%                             data.X_ref  - Activation maps
-%                             data.b_ref  - Bias terms
+%       data                - Updated data struct with new fields in mcsbd_slice:
+%                             data.mcsbd_slice.A - Deconvolved kernels
+%                             data.mcsbd_slice.X - Activation maps
+%                             data.mcsbd_slice.b - Bias terms
+%                             data.mcsbd_slice.extras - Optimization info
+%                             data.mcsbd_slice.mtsbd_time - Execution time
+%                             data.mcsbd_slice.final_metrics - Activation metrics
+%                             data.mcsbd_slice.final_kernel_quality - Kernel quality
 %       params              - Updated parameter struct with MT-SBD settings
-%       results             - Results struct containing:
-%                             results.A - Refined kernels
-%                             results.X - Activation maps
-%                             results.b - Bias terms
-%                             results.extras - Detailed optimization info
-%                             results.params - Algorithm parameters used
-%                             results.mtsbd_time - Execution time
+%       results             - Results struct (for backward compatibility, contains same as data.mcsbd_slice)
 %
 %   DESCRIPTION:
 %       This wrapper encapsulates the MT-SBD (Multi-kernel Tensor Shifted
@@ -58,65 +57,76 @@ function [data, params, results] = decomposeReferenceSlice(data, params, varargi
 %
 %   EXAMPLE:
 %       % Standard MT-SBD
-%       [data, params, results] = decomposeReferenceSlice(data, params);
+%       [data, params, results] = decomposeReferenceSlice(log, data, params);
 %
 %       % With Phase II refinement
-%       [data, params, results] = decomposeReferenceSlice(data, params, ...
+%       [data, params, results] = decomposeReferenceSlice(log, data, params, ...
 %           'phase2_enable', true, 'maxIT', 20);
 %
 %   See also: MTSBD_synthetic, Asolve_Manopt_tunable, Xsolve_FISTA_tunable
 
-    % Parse input arguments
-    p = inputParser;
-    addRequired(p, 'data', @isstruct);
-    addRequired(p, 'params', @isstruct);
+    % Validate required inputs
+    if ~isstruct(log) || ~isfield(log, 'path') || ~isfield(log, 'file')
+        error('log must be a struct with .path and .file fields');
+    end
+    if ~isstruct(data)
+        error('data must be a struct');
+    end
+    if ~isstruct(params)
+        error('params must be a struct');
+    end
     
-    % Phase I settings
-    addParameter(p, 'initial_iteration', 1, @isnumeric);
-    addParameter(p, 'maxIT', 15, @isnumeric);
-    addParameter(p, 'lambda1', [], @(x) isempty(x) || isnumeric(x));
+    % Extract parameters from hierarchical structure (if needed)
+    if isfield(params, 'synGen')
+        params = organizeParams(params, 'extract');
+    end
     
-    % Phase II settings
-    addParameter(p, 'phase2_enable', false, @islogical);
-    addParameter(p, 'lambda2', [], @(x) isempty(x) || isnumeric(x));
-    addParameter(p, 'nrefine', 5, @isnumeric);
-    addParameter(p, 'kplus_factor', 0.5, @isnumeric);
+    % Extract data from hierarchical structure (if needed)
+    if isfield(data, 'synGen') || isfield(data, 'mcsbd_slice')
+        data = organizeData(data, 'extract');
+    end
     
-    % Algorithm parameters
-    addParameter(p, 'signflip_threshold', 0.2, @isnumeric);
-    addParameter(p, 'xpos', true, @islogical);
-    addParameter(p, 'getbias', true, @islogical);
-    addParameter(p, 'Xsolve_method', 'FISTA', @(x) ismember(x, {'FISTA', 'pdNCG'}));
-    
-    % Initialization options
-    addParameter(p, 'use_xinit', [], @(x) isempty(x) || isstruct(x));
-    
-    % Display options
-    addParameter(p, 'show_progress', true, @islogical);
-    
-    parse(p, data, params, varargin{:});
-    
-    % Extract parameters
-    initial_iteration = p.Results.initial_iteration;
-    maxIT = p.Results.maxIT;
-    lambda1 = p.Results.lambda1;
-    phase2_enable = p.Results.phase2_enable;
-    lambda2 = p.Results.lambda2;
-    nrefine = p.Results.nrefine;
-    kplus_factor = p.Results.kplus_factor;
-    signflip_threshold = p.Results.signflip_threshold;
-    xpos = p.Results.xpos;
-    getbias = p.Results.getbias;
-    Xsolve_method = p.Results.Xsolve_method;
-    use_xinit = p.Results.use_xinit;
-    show_progress = p.Results.show_progress;
-    
-    % Validate required fields in data struct
-    required_fields = {'Y_ref', 'A1', 'X0_ref', 'A0_ref'};
+    % All parameters are required; do not give default values
+    required_fields = {'initial_iteration', 'maxIT', 'lambda1', 'phase2_enable', ...
+        'lambda2', 'nrefine', 'kplus_factor', 'signflip_threshold', 'xpos', ...
+        'getbias', 'Xsolve_method', 'use_xinit', 'show_progress'};
     for i = 1:length(required_fields)
-        if ~isfield(data, required_fields{i})
-            error('Data struct must contain field: %s', required_fields{i});
+        if ~isfield(params, required_fields{i})
+            error('Parameter "%s" is required in params struct.', required_fields{i});
         end
+    end
+
+    initial_iteration   = params.initial_iteration;
+    maxIT               = params.maxIT;
+    lambda1             = params.lambda1;
+    phase2_enable       = params.phase2_enable;
+    lambda2             = params.lambda2;
+    nrefine             = params.nrefine;
+    kplus_factor        = params.kplus_factor;
+    signflip_threshold  = params.signflip_threshold;
+    xpos                = params.xpos;
+    getbias             = params.getbias;
+    Xsolve_method       = params.Xsolve_method;
+    use_xinit           = params.use_xinit;
+    show_progress       = params.show_progress;
+    
+    % Validate Xsolve_method
+    if ~ismember(Xsolve_method, {'FISTA', 'pdNCG'})
+        error('Xsolve_method must be ''FISTA'' or ''pdNCG''');
+    end
+    
+    % Validate required fields in data struct (flat structure, after unpacking)
+    if ~isfield(data, 'Y_ref')
+        error('Data struct must contain field: Y_ref');
+    end
+    if ~isfield(data, 'X0_ref')
+        error('Data struct must contain field: X0_ref');
+    end
+    if ~isfield(data, 'A0_ref')
+        error('Data struct must contain field: A0_ref');
+    end
+    if ~isfield(data, 'A_init')
+        error('Data struct must contain field: A_init (from initializeKernelsRef or autoInitializeKernels)');
     end
     
     % Validate required fields in params struct
@@ -144,6 +154,10 @@ function [data, params, results] = decomposeReferenceSlice(data, params, varargi
         error('lambda2 must be scalar or vector of length num_kernels (%d)', params.num_kernels);
     end
     
+    % LOG: function start
+    LOGcomment = sprintf("DS01A: maxIT=%d, lambda1=%s, phase2=%d", maxIT, mat2str(lambda1, 3), phase2_enable);
+    LOGcomment = logUsedBlocks(log.path, log.file, "DS01A", LOGcomment, 0);
+    
     % Set up display functions for monitoring
     fprintf('  Setting up MT-SBD...\n');
     if show_progress
@@ -151,7 +165,7 @@ function [data, params, results] = decomposeReferenceSlice(data, params, varargi
         dispfun = cell(1, params.num_kernels);
         for n = 1:params.num_kernels
             dispfun{n} = @(Y, A, X, kernel_sizes, kplus) ...
-                showims(data.Y_ref, data.A1{n}, data.X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
+                showims(data.Y_ref, data.A_init{n}, data.X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
         end
     else
         dispfun = cell(1, params.num_kernels);
@@ -179,7 +193,7 @@ function [data, params, results] = decomposeReferenceSlice(data, params, varargi
     % Run MT-SBD on reference slice
     tic;
     [A_ref, X_ref, bout, extras] = MTSBD_synthetic(...
-        data.Y_ref, kernel_sizes_ref, sbd_params, dispfun, data.A1, initial_iteration, maxIT);
+        data.Y_ref, kernel_sizes_ref, sbd_params, dispfun, data.A_init, initial_iteration, maxIT);
     mtsbd_time = toc;
     
     fprintf('  MT-SBD completed in %.2f seconds.\n', mtsbd_time);
@@ -194,23 +208,20 @@ function [data, params, results] = decomposeReferenceSlice(data, params, varargi
     end
     fprintf('\n');
     
-    % Store results in data struct
-    data.A_ref = A_ref;
-    data.X_ref = X_ref;
-    data.b_ref = bout;
+    % LOG: MT-SBD results
+    LOGcomment = sprintf("Completed in %.2fs, Final metrics: Act=%s, Qual=%s", ...
+        mtsbd_time, mat2str(final_metrics, 3), mat2str(final_kernel_quality, 3));
+    LOGcomment = logUsedBlocks(log.path, log.file, "  ^  ", LOGcomment, 0);
     
-    % Store results struct (comprehensive results for analysis)
-    results = struct();
-    results.A = A_ref;
-    results.X = X_ref;
-    results.b = bout;
-    results.extras = extras;
-    results.params = sbd_params;
-    results.mtsbd_time = mtsbd_time;
-    results.final_metrics = final_metrics;
-    results.final_kernel_quality = final_kernel_quality;
+    % Store results in data
+    data.X = X_ref;
+    data.b = bout;
+    data.extras = extras;
+    data.mtsbd_time = mtsbd_time;
+    data.final_metrics = final_metrics;
+    data.final_kernel_quality = final_kernel_quality;
     
-    % Update params struct with MT-SBD settings
+    % Update params struct with MT-SBD settings (flat structure)
     params.initial_iteration = initial_iteration;
     params.maxIT = maxIT;
     params.lambda1 = lambda1;
@@ -223,6 +234,10 @@ function [data, params, results] = decomposeReferenceSlice(data, params, varargi
     params.getbias = getbias;
     params.Xsolve_method = Xsolve_method;
     params.kernel_sizes_ref = kernel_sizes_ref;
+    
+    % Write data and params to hierarchical structure for storage
+    data = organizeData(data, 'write');
+    params = organizeParams(params, 'write');
     
     fprintf('  Reference slice MT-SBD complete.\n');
 end
