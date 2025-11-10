@@ -1,10 +1,8 @@
 function [data, params] = autoInitializeKernels(log, data, params, varargin)
 %AUTOINITIALIZEKERNELS Automatically initialize kernels from ground truth activations
-%   Now includes internal logging
 %
-%   Automatically finds most isolated points in ground truth activation maps
-%   and initializes kernels using those positions. Does NOT require running
-%   MT-SBD algorithm first - works directly on synthetic data.
+%   Finds most isolated activation points and initializes kernels at those
+%   positions. Works directly on synthetic data without running MT-SBD first.
 %
 %   [data, params] = autoInitializeKernels(log, data, params, ...)
 %
@@ -34,12 +32,14 @@ function [data, params] = autoInitializeKernels(log, data, params, varargin)
 %                             params.initialization.kernel_sizes - sizes for initialization
 %
 %   DESCRIPTION:
-%       This wrapper automatically initializes kernels for the reference slice
-%       by finding the most isolated activation points in ground truth data:
+%       Automatically initializes kernels by finding most isolated activation
+%       points within allowed region (ensures kernel fits within image):
 %       1. Detects defects above threshold in ground truth activation maps
-%       2. Calculates isolation scores (distance to other-kernel defects)
-%       3. Selects most isolated point per kernel
-%       4. Initializes kernels at those positions with Gaussian window
+%       2. Filters to allowed region (based on kernel size and image boundaries)
+%       3. Finds most isolated point within allowed region
+%       4. Fallback: if no valid points, uses activation closest to center
+%       5. Extracts kernel patch (pads with zeros if extends beyond boundaries)
+%       6. Applies window function to kernel
 %
 %   EXAMPLE:
 %       % Auto initialization with defaults
@@ -144,49 +144,71 @@ function [data, params] = autoInitializeKernels(log, data, params, varargin)
         [other_rows, other_cols] = find(X_others > max(X_others,[],'all') / isolation_threshold_factor);
         other_positions = [other_rows, other_cols];
         
-        % Boundary check based on target kernel size
+        % Get kernel size and image dimensions for boundary check
         if strcmp(target_kernel_size_type, 'kernel_sizes_all')
-            half_kernel_size = floor(squeeze(target_kernel_sizes(params.ref_slice,k,:))' / 2);
+            ksize = squeeze(target_kernel_sizes(params.ref_slice,k,:))';
         else
-            half_kernel_size = floor(target_kernel_sizes(k,:) / 2);
+            ksize = target_kernel_sizes(k,:);
         end
+        img_height = size(X_gt, 1);
+        img_width = size(X_gt, 2);
+        half_size = floor(ksize / 2);
         
-        % Filter out points too close to boundaries
+        % Define allowed region: centers where full kernel fits within image
+        min_y = 1 + half_size(1);
+        max_y = img_height - ksize(1) + 1 + half_size(1);
+        min_x = 1 + half_size(2);
+        max_x = img_width - ksize(2) + 1 + half_size(2);
+        
+        % Filter to points within allowed region
         valid_points = true(num_defects(k), 1);
         for i = 1:num_defects(k)
             y = defect_positions{k}(i,1);
             x = defect_positions{k}(i,2);
-            
-            if y <= half_kernel_size(1) || y >= size(X_gt,1) - half_kernel_size(1) || ...
-               x <= half_kernel_size(2) || x >= size(X_gt,2) - half_kernel_size(2)
+            if y < min_y || y > max_y || x < min_x || x > max_x
                 valid_points(i) = false;
             end
         end
         
-        % Process valid points
+        % Find most isolated point within allowed region
         valid_defects = defect_positions{k}(valid_points,:);
         if isempty(valid_defects)
-            error('No valid isolated points for kernel %d - all too close to boundaries', k);
+            % Fallback: use activation closest to image center
+            warning('Kernel %d: No valid points in allowed region. Using fallback: closest to center. Allowed region: y=[%d,%d], x=[%d,%d]', ...
+                k, min_y, max_y, min_x, max_x);
+            
+            if isempty(defect_positions{k})
+                error('Kernel %d: No activation points found at all', k);
+            end
+            
+            img_center = [img_height/2, img_width/2];
+            distances_to_center = sum((defect_positions{k} - img_center).^2, 2);
+            [~, closest_idx] = min(distances_to_center);
+            most_isolated_points{k} = defect_positions{k}(closest_idx,:);
+            isolation_scores{k} = [];
+            
+            fprintf('    Kernel %d: Fallback - closest to center at (%d,%d)\n', ...
+                k, most_isolated_points{k}(1), most_isolated_points{k}(2));
+        else
+            % Calculate isolation scores (min distance to other-kernel defects)
+            S_k = zeros(size(valid_defects, 1), 1);
+            for i = 1:size(valid_defects, 1)
+                diffs = other_positions - valid_defects(i,:);
+                distances = sum(diffs.^2, 2);
+                S_k(i) = min(distances);
+            end
+            
+            % Select most isolated point
+            [max_score, max_idx] = max(S_k);
+            valid_indices = find(valid_points);
+            max_idx = valid_indices(max_idx);
+            
+            most_isolated_points{k} = defect_positions{k}(max_idx,:);
+            isolation_scores{k} = S_k;
+            
+            fprintf('    Kernel %d: Most isolated at (%d,%d), score=%.2f\n', ...
+                k, most_isolated_points{k}(1), most_isolated_points{k}(2), max_score);
         end
-        
-        % Calculate isolation scores (distance to nearest other-kernel defect)
-        S_k = zeros(size(valid_defects, 1), 1);
-        for i = 1:size(valid_defects, 1)
-            diffs = other_positions - valid_defects(i,:);
-            distances = sum(diffs.^2, 2);
-            S_k(i) = min(distances);
-        end
-        
-        % Find most isolated point
-        [max_score, max_idx] = max(S_k);
-        valid_indices = find(valid_points);
-        max_idx = valid_indices(max_idx);
-        
-        most_isolated_points{k} = defect_positions{k}(max_idx,:);
-        isolation_scores{k} = S_k;
-        
-        fprintf('    Kernel %d: Most isolated at (%d,%d), score=%.2f\n', ...
-            k, most_isolated_points{k}(1), most_isolated_points{k}(2), max_score);
     end
     
     % Visualize isolation analysis if requested
@@ -244,52 +266,73 @@ function [data, params] = autoInitializeKernels(log, data, params, varargin)
             ksize = target_kernel_sizes(k,:);
         end
         
-        % Extract patch from observation at isolated position
+        % Extract kernel patch (pad with zeros if extends beyond boundaries)
         y_center = most_isolated_points{k}(1);
         x_center = most_isolated_points{k}(2);
         half_size = floor(ksize / 2);
         
-        y_range = (y_center - half_size(1)):(y_center + half_size(1));
-        x_range = (x_center - half_size(2)):(x_center + half_size(2));
+        % Calculate extraction range (may extend beyond image)
+        y_range_desired = (y_center - half_size(1)):(y_center + half_size(1));
+        x_range_desired = (x_center - half_size(2)):(x_center + half_size(2));
         
-        % Handle size adjustment
-        if length(y_range) > ksize(1)
-            y_range = y_range(1:ksize(1));
+        % Adjust for even-sized kernels
+        if length(y_range_desired) > ksize(1)
+            y_range_desired = y_range_desired(1:ksize(1));
         end
-        if length(x_range) > ksize(2)
-            x_range = x_range(1:ksize(2));
+        if length(x_range_desired) > ksize(2)
+            x_range_desired = x_range_desired(1:ksize(2));
         end
         
-        kernel_patch = data.Y_ref(y_range, x_range);
+        % Clip to image boundaries
+        img_height = size(data.Y_ref, 1);
+        img_width = size(data.Y_ref, 2);
+        y_range_valid = max(1, min(y_range_desired)):min(img_height, max(y_range_desired));
+        x_range_valid = max(1, min(x_range_desired)):min(img_width, max(x_range_desired));
+        
+        % Extract and pad if needed
+        if isempty(y_range_valid) || isempty(x_range_valid)
+            warning('Kernel %d: Entire kernel out of bounds. Using zeros.', k);
+            kernel_patch = zeros(ksize(1), ksize(2));
+        else
+            kernel_patch_valid = data.Y_ref(y_range_valid, x_range_valid);
+            kernel_patch = zeros(ksize(1), ksize(2));
+            
+            % Place valid portion in correct position (accounting for clipping)
+            y_offset = max(0, 1 - min(y_range_desired));
+            x_offset = max(0, 1 - min(x_range_desired));
+            y_kernel_start = y_offset + 1;
+            y_kernel_end = y_offset + length(y_range_valid);
+            x_kernel_start = x_offset + 1;
+            x_kernel_end = x_offset + length(x_range_valid);
+            
+            kernel_patch(y_kernel_start:y_kernel_end, x_kernel_start:x_kernel_end) = kernel_patch_valid;
+            
+            if min(y_range_desired) < 1 || max(y_range_desired) > img_height || ...
+               min(x_range_desired) < 1 || max(x_range_desired) > img_width
+                fprintf('    Kernel %d: Padding with zeros (extends beyond boundaries)\n', k);
+            end
+        end
         
         % Apply window function
         if strcmp(window_type, 'gaussian')
-            % For gaussian window with sigma parameter
             A_init{k} = windowToKernel(kernel_patch, window_type, window_sigma);
         elseif ~isempty(window_type) && ~strcmp(window_type, 'none')
-            % For other window types without parameters
             A_init{k} = windowToKernel(kernel_patch, window_type);
         else
-            % No window
             A_init{k} = kernel_patch;
         end
         
         fprintf('    Kernel %d: Initialized with size [%d×%d]\n', k, size(A_init{k},1), size(A_init{k},2));
     end
     
-    % Store results in flat structure (will convert to hierarchical at end)
-    % Data: A_init at data.A_init (will be organized to data.initialization.A_init)
+    % Store results (will convert to hierarchical structure at end)
     data.A_init = A_init;
-    % Store kernel centers in data (will be organized to data.initialization.kernel_centers)
     data.init_kernel_centers = kernel_centers;
-    
-    % Store parameters in flat structure (will convert to hierarchical at end)
     params.init_method = 'auto';
     params.init_window = {window_type, window_sigma};
-    params.kernel_sizes = target_kernel_sizes;  % Note: initialization sizes (may differ from generation sizes)
-    % Note: kernel_centers stored only in data.initialization, not in params
+    params.kernel_sizes = target_kernel_sizes;
     
-    % LOG: Auto initialization results
+    % Log initialization results
     LOGcomment = sprintf("Auto-initialized kernels: method=%s, num_kernels=%d" ...
         ,params.init_method, params.num_kernels);
     LOGcomment = logUsedBlocks(log.path, log.file, "  ^  ", LOGcomment, 0);

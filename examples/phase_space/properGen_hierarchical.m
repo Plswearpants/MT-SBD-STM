@@ -1,7 +1,3 @@
-%% Clear workspace and initialize
-clc; clear;
-run('../init_sbd');
-
 %% 1. Initial Setup
 % Load LDoS simulation data for kernel selection
 load('example_data/LDoS_single_defect_save.mat');
@@ -24,9 +20,10 @@ fixed_params.N_single = N;                      % Input lattice size
 fixed_params.num_kernels = num_kernels;         % Number of kernels
 
 % Define parameter ranges for param_sets
-SNR_values = [3, 1];                     % Different noise levels
-defect_density_values = logspace(-3, -2, 2);    % Different activation densities
-N_obs_values = [50, 100];           % Different observation lattice sizes
+SNR_values = [0.2, 0.5, 1, 1.5, 2, 2.5, 3];                     % Different noise levels
+defect_density_values = [1e-3, 5e-3, 1e-2, 5e-2, 1e-1];    % Different activation densities
+N_obs_values = [40, 50, 60, 70, 80, 90, 100, 150];           % Different observation lattice sizes
+rep = 3;  % Number of repetitions (random activation patterns) per (N_obs, rho_d) combination
 
 % Create parameter set matrix
 [S, D, N] = meshgrid(SNR_values, defect_density_values, N_obs_values);
@@ -36,14 +33,16 @@ fprintf('Parameter space setup complete:\n');
 fprintf('- SNR values: %d points from %.2f to %.2f\n', length(SNR_values), min(SNR_values), max(SNR_values));
 fprintf('- Defect density values: %d points from %.2e to %.2e\n', length(defect_density_values), min(defect_density_values), max(defect_density_values));
 fprintf('- N_obs values: %d points from %d to %d\n', length(N_obs_values), min(N_obs_values), max(N_obs_values));
+fprintf('- Repetitions (rep): %d per (N_obs, rho_d) combination\n', rep);
 fprintf('Total parameter combinations: %d\n', size(param_sets, 1));
+fprintf('Total datasets (with repetitions): %d\n', size(param_sets, 1) * rep);
 
 % Display and confirm kernel selection
 confirm_kernel_selection(LDoS_sim, sliceidx);
 
 %% 2. Generate Base Activations (Step 1)
 fprintf('\nStep 1: Generating base activations for different defect densities...\n');
-base_activations = struct('X0', {}, 'defect_density', {}, 'N_obs', {});
+base_activations = struct('X0', {}, 'defect_density', {}, 'N_obs', {}, 'repetition', {});
 
 % Create figure for activation review
 act_fig = figure('Name', 'Base Activation Pattern Review', ...
@@ -52,102 +51,132 @@ act_fig = figure('Name', 'Base Activation Pattern Review', ...
 % Get unique combinations of defect_density and N_obs
 unique_combinations = unique(param_sets(:,[2 3]), 'rows');  % [rho_d, N_obs]
 
-% Generate and confirm base activations for each combination
+% Generate rep activations for each unique combination
+activation_counter = 1;
 for i = 1:size(unique_combinations, 1)
-    confirmed = false;
-    while ~confirmed
-        rho_d = unique_combinations(i,1);
-        N_obs = unique_combinations(i,2);
-        
-        fprintf('Generating activation for rho_d = %.2e, N_obs = %d (%d/%d)\n', ...
-            rho_d, N_obs, i, size(unique_combinations,1));
-        
-        % Generate activation maps for this N_obs and density
-        X0 = generate_activation_maps(N_obs, rho_d, fixed_params.p_scale, fixed_params.num_kernels);
-        
-        % Check for overlap between activations (generalized for any number of kernels)
-        overlap_fraction = mean(sum(X0,3) > 1, 'all');
-        has_overlap = overlap_fraction > 0;
-        
-        % If there's overlap, regenerate automatically
-        if has_overlap
-            fprintf('Overlap detected (%.4f%%), regenerating...\n', 100*overlap_fraction);
-            continue;  % Skip to next iteration to regenerate
-        end
-        
-        % Display for review
-        clf(act_fig);
-        
-        % Create RGB image combining up to 3 activations for visualization
-        rgb_activation = zeros([N_obs*fixed_params.p_scale N_obs*fixed_params.p_scale 3]);
-        for ch = 1:min(3, fixed_params.num_kernels)
-            rgb_activation(:,:,ch) = X0(:,:,ch);
-        end
-        
-        % Display combined activations
-        imagesc(rgb_activation);
-        if fixed_params.num_kernels == 2
-            title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d)\nRed: Kernel 1, Green: Kernel 2\nYellow: Overlap', ...
-                rho_d, N_obs), 'FontSize', 12);
-        elseif fixed_params.num_kernels == 3
-            title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d)\nRed: Kernel 1, Green: Kernel 2, Blue: Kernel 3', ...
-                rho_d, N_obs), 'FontSize', 12);
-        else
-            title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d)...'), 'FontSize', 12, 'Interpreter', 'tex');
-        end
-        axis square;
-        
-        % Add colorbar with custom labels
-        colorbar('Ticks', [0, 0.5, 1], ...
-                'TickLabels', {'None', '', 'Active'});
-        
-        % Add UI controls
-        regenerate_btn = uicontrol('Parent', act_fig, ...
-                                 'Style', 'pushbutton', ...
-                                 'String', 'Regenerate', ...
-                                 'Position', [20 20 100 40], ...
-                                 'Callback', @(src,event) regenerate_dataset());
-        
-        confirm_btn = uicontrol('Parent', act_fig, ...
-                               'Style', 'pushbutton', ...
-                               'String', 'Confirm', ...
-                               'Position', [140 20 100 40], ...
-                               'Callback', @(src,event) confirm_dataset());
-        
-        % Add text showing activation statistics for all kernels
-        activation_rates = zeros(1, fixed_params.num_kernels);
-        for k = 1:fixed_params.num_kernels
-            activation_rates(k) = 100*mean(X0(:,:,k), 'all');
-        end
-        stats_str = sprintf('Activation Rates:\n');
-        for k = 1:fixed_params.num_kernels
-            stats_str = [stats_str, sprintf('Kernel %d: %.4f%%\n', k, activation_rates(k))];
-        end
-        stats_str = [stats_str, sprintf('Overlap: %.4f%%', 100*overlap_fraction)];
-        
-        uicontrol('Parent', act_fig, ...
-                 'Style', 'text', ...
-                 'String', stats_str, ...
-                 'Position', [260 20 200 60+20*(fixed_params.num_kernels-2)], ...
-                 'BackgroundColor', get(act_fig, 'Color'), ...
-                 'HorizontalAlignment', 'left');
-        
-        drawnow;
-        uiwait(act_fig);
-    end
+    rho_d = unique_combinations(i,1);
+    N_obs = unique_combinations(i,2);
     
-    % Store confirmed activation
-    base_activations(i).X0 = X0;
-    base_activations(i).defect_density = rho_d;
-    base_activations(i).N_obs = N_obs;
+    fprintf('Generating %d activations for rho_d = %.2e, N_obs = %d (%d/%d unique combinations)\n', ...
+        rep, rho_d, N_obs, i, size(unique_combinations,1));
+    
+    % Generate rep activation patterns for this combination
+    for r = 1:rep
+        is_confirmed = false;
+        while ~is_confirmed
+            fprintf('  Generating repetition %d/%d...\n', r, rep);
+            
+            % Generate activation maps for this N_obs and density
+            X0 = generate_activation_maps(N_obs, rho_d, fixed_params.p_scale, fixed_params.num_kernels);
+            
+            % Check for overlap between activations (generalized for any number of kernels)
+            overlap_fraction = mean(sum(X0,3) > 1, 'all');
+            has_overlap = overlap_fraction > 0;
+            
+            % If there's overlap, regenerate automatically
+            if has_overlap
+                fprintf('    Overlap detected (%.4f%%), regenerating...\n', 100*overlap_fraction);
+                continue;  % Skip to next iteration to regenerate
+            end
+            
+            % Display for review (only for first repetition, then auto-generate)
+            if r == 1
+                % Clear any previous confirmed flag
+                if evalin('base', 'exist(''activation_confirmed'', ''var'')')
+                    evalin('base', 'clear activation_confirmed');
+                end
+                
+                clf(act_fig);
+                
+                % Create RGB image combining up to 3 activations for visualization
+                rgb_activation = zeros([N_obs*fixed_params.p_scale N_obs*fixed_params.p_scale 3]);
+                for ch = 1:min(3, fixed_params.num_kernels)
+                    rgb_activation(:,:,ch) = X0(:,:,ch);
+                end
+                
+                % Display combined activations
+                imagesc(rgb_activation);
+                if fixed_params.num_kernels == 2
+                    title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d, Rep 1/%d)\nRed: Kernel 1, Green: Kernel 2\nYellow: Overlap', ...
+                        rho_d, N_obs, rep), 'FontSize', 12);
+                elseif fixed_params.num_kernels == 3
+                    title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d, Rep 1/%d)\nRed: Kernel 1, Green: Kernel 2, Blue: Kernel 3', ...
+                        rho_d, N_obs, rep), 'FontSize', 12);
+                else
+                    title(sprintf('Combined Activations (\\rho_d=%.2e, N_{obs}=%d, Rep 1/%d)...', ...
+                        rho_d, N_obs, rep), 'FontSize', 12, 'Interpreter', 'tex');
+                end
+                axis square;
+                
+                % Add colorbar with custom labels
+                colorbar('Ticks', [0, 0.5, 1], ...
+                        'TickLabels', {'None', '', 'Active'});
+                
+                % Add UI controls
+                regenerate_btn = uicontrol('Parent', act_fig, ...
+                                         'Style', 'pushbutton', ...
+                                         'String', 'Regenerate', ...
+                                         'Position', [20 20 100 40], ...
+                                         'Callback', @(src,event) regenerate_dataset());
+                
+                confirm_btn = uicontrol('Parent', act_fig, ...
+                                       'Style', 'pushbutton', ...
+                                       'String', 'Confirm', ...
+                                       'Position', [140 20 100 40], ...
+                                       'Callback', @(src,event) confirm_dataset());
+                
+                % Add text showing activation statistics for all kernels
+                activation_rates = zeros(1, fixed_params.num_kernels);
+                for k = 1:fixed_params.num_kernels
+                    activation_rates(k) = 100*mean(X0(:,:,k), 'all');
+                end
+                stats_str = sprintf('Activation Rates:\n');
+                for k = 1:fixed_params.num_kernels
+                    stats_str = [stats_str, sprintf('Kernel %d: %.4f%%\n', k, activation_rates(k))];
+                end
+                stats_str = [stats_str, sprintf('Overlap: %.4f%%\n', 100*overlap_fraction)];
+                stats_str = [stats_str, sprintf('Will generate %d total repetitions', rep)];
+                
+                uicontrol('Parent', act_fig, ...
+                         'Style', 'text', ...
+                         'String', stats_str, ...
+                         'Position', [260 20 200 60+20*(fixed_params.num_kernels-2)], ...
+                         'BackgroundColor', get(act_fig, 'Color'), ...
+                         'HorizontalAlignment', 'left');
+                
+                drawnow;
+                uiwait(act_fig);
+                % Check if confirmed was set by the callback
+                if evalin('base', 'exist(''activation_confirmed'', ''var'')')
+                    is_confirmed = evalin('base', 'activation_confirmed');
+                    evalin('base', 'clear activation_confirmed');  % Clear the variable
+                else
+                    % If regenerate was clicked, confirmed variable won't exist, so continue loop
+                    is_confirmed = false;
+                end
+            else
+                % For repetitions 2 through rep, auto-confirm (no UI)
+                is_confirmed = true;
+            end
+        end
+        
+        % Store activation
+        base_activations(activation_counter).X0 = X0;
+        base_activations(activation_counter).defect_density = rho_d;
+        base_activations(activation_counter).N_obs = N_obs;
+        base_activations(activation_counter).repetition = r;
+        activation_counter = activation_counter + 1;
+    end
 end
 close(act_fig);
 
 %% 3. Create Dataset Variations
 fprintf('\nGenerating datasets for all parameter combinations...\n');
-final_datasets = cell(size(param_sets, 1), 1);
-descriptions = cell(size(param_sets, 1), 1);
+total_datasets = size(param_sets, 1) * rep;
+final_datasets = cell(total_datasets, 1);
+descriptions = cell(total_datasets, 1);
 
+dataset_counter = 1;
 for i = 1:size(param_sets, 1)
     % Get parameters for this iteration
     SNR = param_sets(i,1);
@@ -163,24 +192,39 @@ for i = 1:size(param_sets, 1)
     fprintf('Processing combination %d/%d: SNR=%.1f, rho_d=%.2e, N_obs=%d (area_ratio=%.2e)\n', ...
         i, size(param_sets,1), SNR, rho_d, N_obs, area_ratio);
     
-    % Find corresponding base activation
-    base_idx = find([base_activations.defect_density] == rho_d & [base_activations.N_obs] == N_obs);
-    X0 = base_activations(base_idx).X0;
+    % Find all base activations matching this (rho_d, N_obs) combination
+    base_indices = find([base_activations.defect_density] == rho_d & [base_activations.N_obs] == N_obs);
     
-    % Generate kernels
-    [A0, A0_noiseless] = generate_kernels(LDoS_sim(:,:,sliceidx), SNR, ...
-        fixed_params.N_single, N_obs, fixed_params.p_scale);
+    if length(base_indices) ~= rep
+        error('Expected %d activations for rho_d=%.2e, N_obs=%d, but found %d', ...
+            rep, rho_d, N_obs, length(base_indices));
+    end
     
-    % Generate clean observation
-    Y_clean = generate_clean_observation(A0_noiseless, X0);
-    
-    % Add noise
-    [Y, A0] = add_noise_to_dataset(Y_clean, A0_noiseless, SNR);
-    
-    % Store dataset with both N_obs and derived area_ratio
-    final_datasets{i} = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, randn, rho_d, SNR, N_obs, area_ratio);
-    descriptions{i} = sprintf('SNR=%.1f, ρ_d=%.2e, N_obs=%d (area_ratio=%.2e)', ...
-        SNR, rho_d, N_obs, area_ratio);
+    % Generate rep datasets, one for each activation pattern
+    for r = 1:rep
+        base_idx = base_indices(r);
+        X0 = base_activations(base_idx).X0;
+        repetition_idx = base_activations(base_idx).repetition;
+        
+        fprintf('  Generating dataset %d/%d (repetition %d/%d)...\n', ...
+            dataset_counter, total_datasets, r, rep);
+        
+        % Generate kernels
+        [A0, A0_noiseless] = generate_kernels(LDoS_sim(:,:,sliceidx), SNR, ...
+            fixed_params.N_single, N_obs, fixed_params.p_scale);
+        
+        % Generate clean observation
+        Y_clean = generate_clean_observation(A0_noiseless, X0);
+        
+        % Add noise
+        [Y, A0] = add_noise_to_dataset(Y_clean, A0_noiseless, SNR);
+        
+        % Store dataset with both N_obs and derived area_ratio, and repetition index
+        final_datasets{dataset_counter} = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, randn, rho_d, SNR, N_obs, area_ratio, repetition_idx);
+        descriptions{dataset_counter} = sprintf('SNR=%.1f, ρ_d=%.2e, N_obs=%d, rep=%d (area_ratio=%.2e)', ...
+            SNR, rho_d, N_obs, repetition_idx, area_ratio);
+        dataset_counter = dataset_counter + 1;
+    end
 end
 
 % Convert cell arrays to 1D structure arrays
@@ -190,7 +234,8 @@ descriptions = reshape(descriptions, 1, []);
 %% Save Results
 % Add a note about the ordering in the saved file
 ordering_info = struct('SNR_order', 'ascending', ...  % lowest to highest SNR
-                      'SNR_values', SNR_values);
+                      'SNR_values', SNR_values, ...
+                      'rep', rep);  % Number of repetitions
 
 % Save results with timestamp and ordering information
 timestamp = datestr(now, 'yyyymmdd_HHMMSS');
@@ -201,11 +246,13 @@ end
 
 save_filename = fullfile(save_dir, sprintf('synthetic_datasets_%s.mat', timestamp));
 save(save_filename, 'datasets', 'descriptions', 'param_sets', ...
-    'fixed_params', 'sliceidx', 'LDoS_sim', 'ordering_info');
+    'fixed_params', 'sliceidx', 'LDoS_sim', 'ordering_info', 'rep');
 
 fprintf('\nDatasets saved to: %s\n', save_filename);
 fprintf('Saved %d datasets\n', numel(datasets));
 fprintf('Parameter combinations: %d (SNR × defect_density × N_obs)\n', size(param_sets, 1));
+fprintf('Repetitions per combination: %d\n', rep);
+fprintf('Total datasets: %d\n', numel(datasets));
 
 %% 6. Display Results Overview
 fprintf('\nDataset Overview:\n');
@@ -215,11 +262,13 @@ fprintf('Total number of datasets: %d\n\n', numel(datasets));
 unique_SNR = unique(arrayfun(@(x) x.params.SNR, datasets));
 unique_rho_d = unique(arrayfun(@(x) x.params.defect_density, datasets));
 unique_N_obs = unique(arrayfun(@(x) x.params.N_obs, datasets));
+unique_repetitions = unique(arrayfun(@(x) x.params.repetition, datasets));
 
 fprintf('Parameter ranges:\n');
 fprintf('- SNR: %d values (%.1f to %.1f)\n', length(unique_SNR), min(unique_SNR), max(unique_SNR));
 fprintf('- Defect density: %d values (%.2e to %.2e)\n', length(unique_rho_d), min(unique_rho_d), max(unique_rho_d));
 fprintf('- N_obs: %d values (%d to %d)\n', length(unique_N_obs), min(unique_N_obs), max(unique_N_obs));
+fprintf('- Repetitions: %d values (%d to %d)\n', length(unique_repetitions), min(unique_repetitions), max(unique_repetitions));
 
 % Create separate figures for different N_obs values
 for n = 1:length(unique_N_obs)
@@ -430,7 +479,7 @@ function confirm_kernel_selection(LDoS_sim, sliceidx)
     end
 end
 
-function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, rho_d, SNR, N_obs, area_ratio)
+function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, rho_d, SNR, N_obs, area_ratio, repetition)
     dataset.Y = Y;
     dataset.Y_clean = Y_clean;
     dataset.A0 = A0;
@@ -450,7 +499,8 @@ function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, rho_d, SN
                           'kernel_size', kernel_sizes, ...  % [n×2] matrix of kernel sizes
                           'SNR', SNR, ...
                           'N_obs', N_obs, ...
-                          'area_ratio', area_ratio);
+                          'area_ratio', area_ratio, ...
+                          'repetition', repetition);
     dataset.b0 = b0;
 end
 
@@ -588,6 +638,6 @@ function regenerate_dataset()
 end
 
 function confirm_dataset()
-    assignin('base', 'confirmed', true);
+    assignin('base', 'activation_confirmed', true);
     uiresume;
 end 

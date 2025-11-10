@@ -8,32 +8,76 @@ function visualize_heatspace_details_properGen(dataset_metrics)
     fprintf('SNR: [%.1f to %.1f]\n', min(dataset_metrics.SNR_values), max(dataset_metrics.SNR_values));
     fprintf('Nobs: [%.0f to %.0f]\n', min(dataset_metrics.Nobs_values), max(dataset_metrics.Nobs_values));
     
+    % Check if repetitions are available
+    has_repetitions = isfield(dataset_metrics, 'repetition_values') && ...
+                      length(dataset_metrics.repetition_values) > 1;
+    if has_repetitions
+        fprintf('Repetitions: [%d to %d]\n', min(dataset_metrics.repetition_values), max(dataset_metrics.repetition_values));
+    end
+    
     % Get user input
     theta_cap = input('Enter Theta Cap value: ');
     snr = input('Enter SNR value: ');
     nobs = input('Enter Nobs value: ');
+    
+    % Get repetition if available
+    if has_repetitions
+        rep = input(sprintf('Enter Repetition number [%d-%d] (or press Enter to use first available): ', ...
+            min(dataset_metrics.repetition_values), max(dataset_metrics.repetition_values)));
+        if isempty(rep)
+            rep = 1;  % Default to first repetition
+        end
+    else
+        rep = 1;  % Default for backward compatibility
+    end
     
     % Find nearest indices in the parameter space
     [~, theta_idx] = min(abs(dataset_metrics.theta_cap_values - theta_cap));
     [~, snr_idx] = min(abs(dataset_metrics.SNR_values - snr));
     [~, nobs_idx] = min(abs(dataset_metrics.Nobs_values - nobs));
     
+    % Find repetition index
+    if has_repetitions
+        [~, rep_idx] = min(abs(dataset_metrics.repetition_values - rep));
+        rep_actual = dataset_metrics.repetition_values(rep_idx);
+    else
+        rep_idx = 1;
+        rep_actual = 1;
+    end
+    
     % Print actual values being used (in case of rounding)
     fprintf('\nUsing nearest available parameters:\n');
     fprintf('Theta Cap: %.2e\n', dataset_metrics.theta_cap_values(theta_idx));
     fprintf('SNR: %.1f\n', dataset_metrics.SNR_values(snr_idx));
     fprintf('Nobs: %.0f\n', dataset_metrics.Nobs_values(nobs_idx));
+    if has_repetitions
+        fprintf('Repetition: %d\n', rep_actual);
+    end
     
-    % Extract data for the selected point
-    Y = dataset_metrics.Y{snr_idx, theta_idx, nobs_idx};
-    Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, nobs_idx};
-    A0 = dataset_metrics.A0{snr_idx, theta_idx, nobs_idx};
-    A0_noiseless = dataset_metrics.A0_noiseless{snr_idx, theta_idx, nobs_idx};
-    X0 = dataset_metrics.X0{snr_idx, theta_idx, nobs_idx};
-    Aout = dataset_metrics.Aout{snr_idx, theta_idx, nobs_idx};
-    Xout = dataset_metrics.Xout{snr_idx, theta_idx, nobs_idx};
-    bout = dataset_metrics.bout{snr_idx, theta_idx, nobs_idx};
-    extras = dataset_metrics.extras{snr_idx, theta_idx, nobs_idx};
+    % Extract data for the selected point (handle both 3D and 4D indexing)
+    if has_repetitions && ndims(dataset_metrics.Y) == 4
+        % 4D indexing: [SNR × theta × N_obs × rep]
+        Y = dataset_metrics.Y{snr_idx, theta_idx, nobs_idx, rep_idx};
+        Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, nobs_idx, rep_idx};
+        A0 = dataset_metrics.A0{snr_idx, theta_idx, nobs_idx, rep_idx};
+        A0_noiseless = dataset_metrics.A0_noiseless{snr_idx, theta_idx, nobs_idx, rep_idx};
+        X0 = dataset_metrics.X0{snr_idx, theta_idx, nobs_idx, rep_idx};
+        Aout = dataset_metrics.Aout{snr_idx, theta_idx, nobs_idx, rep_idx};
+        Xout = dataset_metrics.Xout{snr_idx, theta_idx, nobs_idx, rep_idx};
+        bout = dataset_metrics.bout{snr_idx, theta_idx, nobs_idx, rep_idx};
+        extras = dataset_metrics.extras{snr_idx, theta_idx, nobs_idx, rep_idx};
+    else
+        % 3D indexing: [SNR × theta × N_obs] (backward compatibility)
+        Y = dataset_metrics.Y{snr_idx, theta_idx, nobs_idx};
+        Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, nobs_idx};
+        A0 = dataset_metrics.A0{snr_idx, theta_idx, nobs_idx};
+        A0_noiseless = dataset_metrics.A0_noiseless{snr_idx, theta_idx, nobs_idx};
+        X0 = dataset_metrics.X0{snr_idx, theta_idx, nobs_idx};
+        Aout = dataset_metrics.Aout{snr_idx, theta_idx, nobs_idx};
+        Xout = dataset_metrics.Xout{snr_idx, theta_idx, nobs_idx};
+        bout = dataset_metrics.bout{snr_idx, theta_idx, nobs_idx};
+        extras = dataset_metrics.extras{snr_idx, theta_idx, nobs_idx};
+    end
     
     % Check if data exists for this point
     if isempty(Aout) || isempty(Xout)
@@ -49,14 +93,37 @@ function visualize_heatspace_details_properGen(dataset_metrics)
     % Call visualizeResults
     visualizeResults(Y, A0_noiseless, Aout, X0, Xout, bout, extras);
     
-    % Print performance metrics
+    % Print performance metrics (handle both 3D and 4D indexing)
     fprintf('\nPerformance Metrics:\n');
-    fprintf('Kernel Quality Score(to noiseless GT): %.3f\n', ...
-        dataset_metrics.kernel_quality_final(snr_idx, theta_idx, nobs_idx));
-    fprintf('Activation Similarity Score: %.3f\n', ...
-        dataset_metrics.activation_similarity_final(snr_idx, theta_idx, nobs_idx));
-    fprintf('Combined Activation Score: %.3f\n', ...
-        dataset_metrics.combined_activationScore(snr_idx, theta_idx, nobs_idx));
+    if has_repetitions && ndims(dataset_metrics.kernel_quality_final) == 4
+        % Show metrics for this specific repetition
+        fprintf('Kernel Quality Score(to noiseless GT): %.3f (Repetition %d)\n', ...
+            dataset_metrics.kernel_quality_final(snr_idx, theta_idx, nobs_idx, rep_idx), rep_actual);
+        fprintf('Activation Similarity Score: %.3f (Repetition %d)\n', ...
+            dataset_metrics.activation_similarity_final(snr_idx, theta_idx, nobs_idx, rep_idx), rep_actual);
+        fprintf('Combined Activation Score: %.3f (Repetition %d)\n', ...
+            dataset_metrics.combined_activationScore(snr_idx, theta_idx, nobs_idx, rep_idx), rep_actual);
+        
+        % Also show average over all repetitions
+        rep_slice_kernel = dataset_metrics.kernel_quality_final(snr_idx, theta_idx, nobs_idx, :);
+        rep_slice_activation = dataset_metrics.activation_similarity_final(snr_idx, theta_idx, nobs_idx, :);
+        rep_slice_combined = dataset_metrics.combined_activationScore(snr_idx, theta_idx, nobs_idx, :);
+        avg_kernel = mean(rep_slice_kernel(:), 'omitnan');
+        avg_activation = mean(rep_slice_activation(:), 'omitnan');
+        avg_combined = mean(rep_slice_combined(:), 'omitnan');
+        fprintf('\nAverage over all repetitions:\n');
+        fprintf('  Kernel Quality Score: %.3f\n', avg_kernel);
+        fprintf('  Activation Similarity Score: %.3f\n', avg_activation);
+        fprintf('  Combined Activation Score: %.3f\n', avg_combined);
+    else
+        % 3D indexing (backward compatibility)
+        fprintf('Kernel Quality Score(to noiseless GT): %.3f\n', ...
+            dataset_metrics.kernel_quality_final(snr_idx, theta_idx, nobs_idx));
+        fprintf('Activation Similarity Score: %.3f\n', ...
+            dataset_metrics.activation_similarity_final(snr_idx, theta_idx, nobs_idx));
+        fprintf('Combined Activation Score: %.3f\n', ...
+            dataset_metrics.combined_activationScore(snr_idx, theta_idx, nobs_idx));
+    end
     fprintf('Demixing Score: %.4f\n', demix_score);
     
     % Print convergence information if available

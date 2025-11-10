@@ -5,8 +5,14 @@ function metrics2heat_properGen(dataset_metrics)
     %       - SNR_values
     %       - theta_cap_values
     %       - Nobs_values
-    %       - kernel_similarity [SNR × theta_cap × Nobs]
-    %       - activation_metrics [SNR × theta_cap × Nobs]
+    %       - repetition_values (optional, for 4D arrays)
+    %       - kernel_similarity [SNR × theta_cap × Nobs] or [SNR × theta_cap × Nobs × rep]
+    %       - activation_metrics [SNR × theta_cap × Nobs] or [SNR × theta_cap × Nobs × rep]
+    % Note: If metrics have a 4th dimension (repetitions), they will be averaged over repetitions
+    
+    % Average over repetitions if 4D arrays are present
+    kernel_quality_avg = average_over_repetitions(dataset_metrics.kernel_quality_final);
+    combined_activation_avg = average_over_repetitions(dataset_metrics.combined_activationScore);
     
     % Create figure with two subplots
     figure('Position', [100 100 1600 800]);
@@ -16,16 +22,16 @@ function metrics2heat_properGen(dataset_metrics)
     h1 = plot_3D_heatspace(dataset_metrics.SNR_values, ...
                           dataset_metrics.theta_cap_values, ...
                           dataset_metrics.Nobs_values, ...
-                          dataset_metrics.kernel_quality_final, ...
-                          'Kernel Similarity');
+                          kernel_quality_avg, ...
+                          'Kernel Similarity (Averaged over Repetitions)');
     
     % 2. Combined Activation Score Heatspace
     subplot(1,2,2);
     h2 = plot_3D_heatspace(dataset_metrics.SNR_values, ...
                           dataset_metrics.theta_cap_values, ...
                           dataset_metrics.Nobs_values, ...
-                          dataset_metrics.combined_activationScore, ...
-                          'Combined Activation Score');
+                          combined_activation_avg, ...
+                          'Combined Activation Score (Averaged over Repetitions)');
 end
 
 function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric_values, title_str)
@@ -125,4 +131,21 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric
     
     % Rotate x-axis labels for better readability
     ax.XTickLabelRotation = 45;
+end
+
+function avg_data = average_over_repetitions(data)
+    % Average over the 4th dimension (repetitions) if present
+    % Input: data can be 3D [SNR × theta × N_obs] or 4D [SNR × theta × N_obs × rep]
+    % Output: 3D array [SNR × theta × N_obs] averaged over repetitions
+    
+    if ndims(data) == 4
+        % Average over the 4th dimension, ignoring NaN values
+        avg_data = mean(data, 4, 'omitnan');
+    elseif ndims(data) == 3
+        % Already 3D, return as is
+        avg_data = data;
+    else
+        % Unexpected dimensions, return as is
+        avg_data = data;
+    end
 end

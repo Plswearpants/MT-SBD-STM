@@ -5,6 +5,12 @@ metrics= loadMetricDataset_new();
 %% create heatspace
 metrics2heat_properGen(metrics);
 
+%% fixed density vis
+% For kernel similarity
+metrics2heat_by_defect_density(metrics, 'kernel');
+
+% For combined activation score
+metrics2heat_by_defect_density(metrics, 'combined');
 %% view detailed dataset
 visualize_heatspace_details_properGen(metrics)
 

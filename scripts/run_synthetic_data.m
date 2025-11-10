@@ -72,7 +72,7 @@ end
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
 params.synGen.SNR = 5;                        % Signal-to-noise ratio
-params.synGen.N_obs = 50;                     % Observation lattice size (pixels)
+params.synGen.N_obs = 30;                     % Observation lattice size (pixels)
 params.synGen.observation_resolution = 3;     % Resolution: pixels per lattice site
 params.synGen.defect_density = 0.01;          % Surface defect density (0-1)
 params.synGen.num_slices = 2;                 % Number of energy slices

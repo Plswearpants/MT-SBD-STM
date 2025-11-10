@@ -2,13 +2,14 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-load('results\synthetic_datasets\synthetic_datasets_20250629_163445.mat');  
+syn_loc = 'results\synthetic_datasets\synthetic_datasets_20251108_114222.mat';
+load(syn_loc);  
 
 %% Initialize kernels for all datasets
 fprintf('Initializing kernels for %d datasets...\n', length(datasets));
 % Choose initialization method ('activation' or 'random')
 init_method = 'activation';
-sigma_gaussian = 5.0;
+sigma_gaussian = 6.0;
 if strcmp(init_method, 'activation')    
     A1_all = initialize_kernels_from_activations(datasets, sigma_gaussian);
 else
@@ -21,7 +22,7 @@ for i = 1:length(datasets)
 end
 
 % Save updated datasets with initialized kernels
-[filepath, name, ext] = fileparts('results\synthetic_datasets\synthetic_datasets_20250120_173448.mat');
+[filepath, name, ext] = fileparts(syn_loc);
 if strcmp(init_method, 'activation')
     init_type = '_init_activation';
 else
@@ -81,7 +82,7 @@ update_config(fullfile(param_dir, 'Asolve_config_tunable.mat'), ...
 
 %% Initialize parallel pool
 if isempty(gcp('nocreate'))
-    parpool(10);  % Creates pool with 9 workers
+    parpool(10);  % Creates pool with 10 workers
 end
 
 %% Run parallel processing on datasets
@@ -100,17 +101,23 @@ for n = 1:num_datasets
     params_all{n}.A0 = datasets(n).A0;
 end
 
+% Create DataQueue for progress updates
+D = parallel.pool.DataQueue;
+completed_count = 0;
+progress_callback = @(x) updateProgress(x, num_datasets);
+afterEach(D, progress_callback);
+
 % Parallel loop over datasets
 parfor n = 1:num_datasets
     try
-        % Minimal progress indicator
-        fprintf('Processing dataset %d/%d\n', n, num_datasets);
-        
         % Extract dataset parameters
         dataset_Y = datasets(n).Y;
         dataset_kernel_size = datasets(n).params.kernel_size;
         dataset_A1 = A1_all{n};
         params_local = params_all{n};  % Get pre-processed params
+        
+        % Print start message
+        fprintf('[START] Dataset %d/%d\n', n, num_datasets);
 
         % Process dataset
         [Aout, Xout, bout, extras] = SBD_test_multi_parallel(...
@@ -123,13 +130,18 @@ parfor n = 1:num_datasets
             param_idx, ...
             maxIT);
 
-        % Save results with minimal console output
+        % Save results
         filename = sprintf('SBD_parallel_dataset%d_optimal.mat', n);
         save_results(filename, Aout, Xout, bout, extras, param_combinations, ...
             param_idx, params_local.A0, params_local.X0);
         
+        % Print end message and send progress update
+        fprintf('[END] Dataset %d/%d (Runtime: %.2fs)\n', n, num_datasets, extras.runtime);
+        send(D, n);
+        
     catch ME
-        fprintf('Error in dataset %d: %s\n', n, ME.message);
+        fprintf('[ERROR] Dataset %d: %s\n', n, ME.message);
+        send(D, n);  % Still count as completed for progress
     end
 end
 
@@ -140,156 +152,155 @@ fprintf('Processing complete!\n');
 
 %% Helper Functions
 function A1_all = initialize_kernels_from_activations(datasets, sigma_gaussian)
-    % Initialize kernels using activation point closest to center for each dataset
+    % Initialize kernels by finding most isolated activation points within allowed region
+    % Falls back to closest-to-center if no valid points found
     % Input:
     %   datasets: 1×N struct array with fields Y, X0, params
+    %   sigma_gaussian: Gaussian window parameter
     % Output:
     %   A1_all: 1×N cell array of initial kernel guesses
     
     num_datasets = length(datasets);
     A1_all = cell(1, num_datasets);
+    isolation_threshold_factor = 10;  % Threshold = max/factor for defect detection
     
     for i = 1:num_datasets
         % Get data for this dataset
         Y = datasets(i).Y;
         X0 = datasets(i).X0;
-        kernel_sizes = datasets(i).params.kernel_size;  % [2×2] matrix of kernel sizes
+        kernel_sizes = datasets(i).params.kernel_size;  % [K×2] matrix of kernel sizes
         num_kernels = size(X0, 3);
         
-        % Calculate image center
-        center = round(size(Y)/2);
+        % Get image dimensions
+        img_height = size(Y, 1);
+        img_width = size(Y, 2);
         
         % Initialize kernels for this dataset
         A1 = cell(1, num_kernels);
+        most_isolated_points = cell(1, num_kernels);
         
+        % Find defect positions for each kernel
+        defect_positions = cell(1, num_kernels);
         for k = 1:num_kernels
-            % Get kernel size for this kernel
-            kernel_height = kernel_sizes(k,1);
-            kernel_width = kernel_sizes(k,2);
-            half_height = floor(kernel_height/2);
-            half_width = floor(kernel_width/2);
+            threshold = max(X0(:,:,k), [], 'all') / isolation_threshold_factor;
+            [rows, cols] = find(X0(:,:,k) > threshold);
+            defect_positions{k} = [rows, cols];
+        end
+        
+        % Find most isolated points for each kernel
+        for k = 1:num_kernels
+            % Get kernel size
+            ksize = kernel_sizes(k,:);
+            half_size = floor(ksize / 2);
             
-            % Find all activation points
-            [rows, cols] = find(X0(:,:,k));
+            % Define allowed region: centers where full kernel fits within image
+            min_y = 1 + half_size(1);
+            max_y = img_height - ksize(1) + 1 + half_size(1);
+            min_x = 1 + half_size(2);
+            max_x = img_width - ksize(2) + 1 + half_size(2);
             
-            if ~isempty(rows)
-                % Calculate distance to center for each activation point
-                distances = sqrt((rows - center(1)).^2 + (cols - center(2)).^2);
-                [~, idx] = min(distances);
-                
-                % Get closest point to center
-                row = rows(idx);
-                col = cols(idx);
-                
-                % Calculate initial window bounds
-                row_start = row - half_height;
-                row_end = row + half_height;
-                col_start = col - half_width;
-                col_end = col + half_width;
-
-                % print row_start, row_end, col_start, col_end
-                fprintf('row_start: %d, row_end: %d, col_start: %d, col_end: %d\n', row_start, row_end, col_start, col_end);
-                
-                % Get image dimensions
-                [img_height, img_width] = size(Y);
-                
-                % Initialize kernel with zeros
-                A1{k} = zeros(kernel_height, kernel_width);
-                
-                % Calculate valid ranges for extraction from Y
-                y_row_start = max(1, row_start);
-                y_row_end = min(img_height, row_end);
-                y_col_start = max(1, col_start);
-                y_col_end = min(img_width, col_end);
-                
-                % Calculate corresponding positions in the kernel
-                k_row_start = y_row_start - row_start + 1;
-                k_row_end = k_row_start + (y_row_end - y_row_start);
-                k_col_start = y_col_start - col_start + 1;
-                k_col_end = k_col_start + (y_col_end - y_col_start);
-                
-                % Extract valid portion from Y and place in kernel
-                if y_row_start <= y_row_end && y_col_start <= y_col_end
-                    A1{k}(k_row_start:k_row_end, k_col_start:k_col_end) = ...
-                        Y(y_row_start:y_row_end, y_col_start:y_col_end);
+            % Filter to points within allowed region
+            valid_points = true(size(defect_positions{k}, 1), 1);
+            for j = 1:size(defect_positions{k}, 1)
+                y = defect_positions{k}(j,1);
+                x = defect_positions{k}(j,2);
+                if y < min_y || y > max_y || x < min_x || x > max_x
+                    valid_points(j) = false;
                 end
-                
-                fprintf('Extracted from Y[%d:%d, %d:%d] -> Kernel[%d:%d, %d:%d]\n', ...
-                    y_row_start, y_row_end, y_col_start, y_col_end, ...
-                    k_row_start, k_row_end, k_col_start, k_col_end);
-                
-                % Resize to match exact kernel size if needed
-                if size(A1{k},1) ~= kernel_height || size(A1{k},2) ~= kernel_width
-                    A1{k} = imresize(A1{k}, [kernel_height, kernel_width]);
-                end
-                
-                % Apply Gaussian window with sigma = 2.5
-                [h, w] = size(A1{k});
-                [X_grid, Y_grid] = meshgrid(1:w, 1:h);
-                center_x = (w + 1) / 2;
-                center_y = (h + 1) / 2;
-                sigma = sigma_gaussian;
-                gaussian_mask = exp(-((X_grid - center_x).^2 + (Y_grid - center_y).^2) / (2 * sigma^2));
-                A1{k} = A1{k} .* gaussian_mask;
-                
-                A1{k} = proj2oblique(A1{k});  % Normalize
-                
-                % Debug information
-                fprintf('Dataset %d, Kernel %d: Window [%d:%d, %d:%d], Size: %dx%d (Target: %dx%d)\n', ...
-                    i, k, row_start, row_end, col_start, col_end, ...
-                    size(A1{k},1), size(A1{k},2), kernel_height, kernel_width);
-            else
-                warning('No activation found for kernel %d in dataset %d', k, i);
-                % Fallback: use center of image with boundary checking
-                [img_height, img_width] = size(Y);
-                
-                % Calculate initial window bounds from center
-                row_start = center(1) - half_height;
-                row_end = center(1) + half_height;
-                col_start = center(2) - half_width;
-                col_end = center(2) + half_width;
-                
-                % Initialize kernel with zeros
-                A1{k} = zeros(kernel_height, kernel_width);
-                
-                % Calculate valid ranges for extraction from Y
-                y_row_start = max(1, row_start);
-                y_row_end = min(img_height, row_end);
-                y_col_start = max(1, col_start);
-                y_col_end = min(img_width, col_end);
-                
-                % Calculate corresponding positions in the kernel
-                k_row_start = y_row_start - row_start + 1;
-                k_row_end = k_row_start + (y_row_end - y_row_start);
-                k_col_start = y_col_start - col_start + 1;
-                k_col_end = k_col_start + (y_col_end - y_col_start);
-                
-                % Extract valid portion from Y and place in kernel
-                if y_row_start <= y_row_end && y_col_start <= y_col_end
-                    A1{k}(k_row_start:k_row_end, k_col_start:k_col_end) = ...
-                        Y(y_row_start:y_row_end, y_col_start:y_col_end);
-                end
-                
-                fprintf('Fallback: Extracted from Y[%d:%d, %d:%d] -> Kernel[%d:%d, %d:%d]\n', ...
-                    y_row_start, y_row_end, y_col_start, y_col_end, ...
-                    k_row_start, k_row_end, k_col_start, k_col_end);
-                
-                % Resize to match exact kernel size if needed
-                if size(A1{k},1) ~= kernel_height || size(A1{k},2) ~= kernel_width
-                    A1{k} = imresize(A1{k}, [kernel_height, kernel_width]);
-                end
-                
-                % Apply Gaussian window with sigma = 2.5
-                [h, w] = size(A1{k});
-                [X_grid, Y_grid] = meshgrid(1:w, 1:h);
-                center_x = (w + 1) / 2;
-                center_y = (h + 1) / 2;
-                sigma = sigma_gaussian;
-                gaussian_mask = exp(-((X_grid - center_x).^2 + (Y_grid - center_y).^2) / (2 * sigma^2));
-                A1{k} = A1{k} .* gaussian_mask;
-                
-                A1{k} = proj2oblique(A1{k});
             end
+            
+            valid_defects = defect_positions{k}(valid_points,:);
+            
+            if isempty(valid_defects)
+                % Fallback: use activation closest to image center
+                if isempty(defect_positions{k})
+                    warning('Dataset %d, Kernel %d: No activation points found. Using image center.', i, k);
+                    img_center = [img_height/2, img_width/2];
+                    most_isolated_points{k} = round(img_center);
+                else
+                    img_center = [img_height/2, img_width/2];
+                    distances_to_center = sum((defect_positions{k} - img_center).^2, 2);
+                    [~, closest_idx] = min(distances_to_center);
+                    most_isolated_points{k} = defect_positions{k}(closest_idx,:);
+                end
+            else
+                % Sum activation maps of all other kernels
+                X_others = zeros(size(X0(:,:,1)));
+                for l = 1:num_kernels
+                    if l ~= k
+                        X_others = X_others + X0(:,:,l);
+                    end
+                end
+                
+                % Get positions in other kernels
+                other_threshold = max(X_others,[],'all') / isolation_threshold_factor;
+                [other_rows, other_cols] = find(X_others > other_threshold);
+                other_positions = [other_rows, other_cols];
+                
+                % Calculate isolation scores (min distance to other-kernel defects)
+                S_k = zeros(size(valid_defects, 1), 1);
+                for j = 1:size(valid_defects, 1)
+                    diffs = other_positions - valid_defects(j,:);
+                    distances = sum(diffs.^2, 2);
+                    S_k(j) = min(distances);
+                end
+                
+                % Select most isolated point
+                [~, max_idx] = max(S_k);
+                valid_indices = find(valid_points);
+                max_idx = valid_indices(max_idx);
+                most_isolated_points{k} = defect_positions{k}(max_idx,:);
+            end
+            
+            % Extract kernel patch (pad with zeros if extends beyond boundaries)
+            y_center = most_isolated_points{k}(1);
+            x_center = most_isolated_points{k}(2);
+            
+            % Calculate extraction range (may extend beyond image)
+            y_range_desired = (y_center - half_size(1)):(y_center + half_size(1));
+            x_range_desired = (x_center - half_size(2)):(x_center + half_size(2));
+            
+            % Adjust for even-sized kernels
+            if length(y_range_desired) > ksize(1)
+                y_range_desired = y_range_desired(1:ksize(1));
+            end
+            if length(x_range_desired) > ksize(2)
+                x_range_desired = x_range_desired(1:ksize(2));
+            end
+            
+            % Clip to image boundaries
+            y_range_valid = max(1, min(y_range_desired)):min(img_height, max(y_range_desired));
+            x_range_valid = max(1, min(x_range_desired)):min(img_width, max(x_range_desired));
+            
+            % Extract and pad if needed
+            if isempty(y_range_valid) || isempty(x_range_valid)
+                warning('Dataset %d, Kernel %d: Entire kernel out of bounds. Using zeros.', i, k);
+                kernel_patch = zeros(ksize(1), ksize(2));
+            else
+                kernel_patch_valid = Y(y_range_valid, x_range_valid);
+                kernel_patch = zeros(ksize(1), ksize(2));
+                
+                % Place valid portion in correct position (accounting for clipping)
+                y_offset = max(0, 1 - min(y_range_desired));
+                x_offset = max(0, 1 - min(x_range_desired));
+                y_kernel_start = y_offset + 1;
+                y_kernel_end = y_offset + length(y_range_valid);
+                x_kernel_start = x_offset + 1;
+                x_kernel_end = x_offset + length(x_range_valid);
+                
+                kernel_patch(y_kernel_start:y_kernel_end, x_kernel_start:x_kernel_end) = kernel_patch_valid;
+            end
+            
+            % Apply Gaussian window
+            [h, w] = size(kernel_patch);
+            [X_grid, Y_grid] = meshgrid(1:w, 1:h);
+            center_x = (w + 1) / 2;
+            center_y = (h + 1) / 2;
+            gaussian_mask = exp(-((X_grid - center_x).^2 + (Y_grid - center_y).^2) / (2 * sigma_gaussian^2));
+            A1{k} = kernel_patch .* gaussian_mask;
+            
+            % Normalize
+            A1{k} = proj2oblique(A1{k});
         end
         
         A1_all{i} = A1;
@@ -362,8 +373,24 @@ function display_dataset_kernels(A1_set, dataset, dataset_idx)
     imagesc(kernel_matrix);
     colormap('gray');
     colorbar;
+    
     title(sprintf('Dataset %d', dataset_idx));
     axis equal tight;
+end
+
+%% Progress update function
+function updateProgress(~, total_datasets)
+    persistent count
+    if isempty(count)
+        count = 0;
+    end
+    count = count + 1;
+    % Simple progress indicator - update every 5% or at completion
+    update_interval = max(1, floor(total_datasets/20));
+    if mod(count, update_interval) == 0 || count == total_datasets
+        fprintf('Progress: %d/%d datasets completed (%.1f%%)\n', ...
+            count, total_datasets, 100*count/total_datasets);
+    end
 end
 
 %% Helper function for saving results
