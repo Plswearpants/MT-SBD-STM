@@ -11,9 +11,15 @@ metrics2heat_by_defect_density(metrics, 'kernel');
 
 % For combined activation score
 metrics2heat_by_defect_density(metrics, 'combined');
+%%
+metrics2heat_by_defect_density(metrics, 'multiplied');
 %% view detailed dataset
 visualize_heatspace_details_properGen(metrics)
 
+%% number of defect occurrence vs kernel similarity
+plot_defects_snr_kernel_similarity(metrics);
+%%
+plot_defects_vs_kernel_similarity_by_snr(metrics);
 %% view combined set 
 % Load your 3 different experiment runs
 metrics1 = loadMetricDataset_new();  % First run
@@ -25,7 +31,7 @@ dataset_metrics_array = {metrics1, metrics2, metrics3};
 
 % Optional: provide names for each run
 run_names = {'Experiment 1', 'Experiment 2', 'Experiment 3'};
-%% number of defect occurrence vs kernel similarity(3D)
+%% number of defect occurrence vs kernel similarity(3D) -> combined version
 combined_metrics = combine_metrics_for_plotting(dataset_metrics_array);
 % Plot
 plot_defects_snr_kernel_similarity(combined_metrics);

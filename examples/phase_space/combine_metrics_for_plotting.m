@@ -60,4 +60,6 @@ combined_metrics = struct();
 combined_metrics.kernel_quality_final = combined_kernel_quality;
 combined_metrics.X0 = combined_X0;
 combined_metrics.SNR_values = unique_snr;
+combined_metrics.theta_cap_values = unique_theta;  % Store defect density values
+combined_metrics.Nobs_values = unique_nobs;  % Store Nobs values for completeness
 end 

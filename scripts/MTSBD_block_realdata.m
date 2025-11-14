@@ -171,13 +171,13 @@ data_carried = data_plane;
 %% 2.end: Normalize background 
 [Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
-%% 3. Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+%% 3. ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 save('LiFeAs_processed0721_FULL.mat', 'data_original', 'Y', 'data_cropped','data_masked',"energy_range", 'preprocessing_params')
 
 
 %% Before Run Standardize
 rangetype ='dynamic';
-%% 4_pre Pick reference slice and Initialize reference kernels
+%% 4_pre Pick reference slice
 f2=figure;
 d3gridDisplay(Y,rangetype);
 params.ref_slice = input('Enter reference slice number: ');
@@ -214,7 +214,7 @@ window_type = {'gaussian', 2};
 
 if same_size
     %[square_size] = squareDrawSize(Y_ref);
-    square_size=[60,60];
+    square_size=[80,80];
     kernel_sizes = repmat(square_size,[num_kernels,1]);
     A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
 else
@@ -255,10 +255,10 @@ for n = 1:num_kernels
 end
 
 % SBD settings.
-miniloop_iteration = 1;
-outerloop_maxIT= 8;
+miniloop_iteration = 2;
+outerloop_maxIT= 2;
 %params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.05, 0.025, 0.03, 0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.02, 0.03, 0.05, 0.05];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.2 * kernel_sizes);

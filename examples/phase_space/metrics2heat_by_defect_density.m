@@ -1,5 +1,5 @@
 function metrics2heat_by_defect_density(dataset_metrics, metric_type)
-    % Create multiple 3D plots with fixed defect density values
+    % Create multiple 2D heatmap plots with fixed defect density values
     % Each plot shows SNR vs Nobs with metric as color
     %
     % Input:
@@ -8,10 +8,12 @@ function metrics2heat_by_defect_density(dataset_metrics, metric_type)
     %       - theta_cap_values (defect density values)
     %       - Nobs_values
     %       - kernel_quality_final [SNR × theta_cap × Nobs] or [SNR × theta_cap × Nobs × rep]
+    %       - activation_similarity_final [SNR × theta_cap × Nobs] or [SNR × theta_cap × Nobs × rep]
     %       - combined_activationScore [SNR × theta_cap × Nobs] or [SNR × theta_cap × Nobs × rep]
-    %   metric_type: 'kernel' or 'combined' (default: 'kernel')
+    %   metric_type: 'kernel', 'combined', or 'multiplied' (default: 'kernel')
     %                'kernel' -> kernel_quality_final
     %                'combined' -> combined_activationScore
+    %                'multiplied' -> kernel_quality_final × activation_similarity_final
     %
     % Output: Creates figure(s) with subplots, one for each defect density value
     
@@ -26,8 +28,14 @@ function metrics2heat_by_defect_density(dataset_metrics, metric_type)
     elseif strcmpi(metric_type, 'combined')
         metric_data = average_over_repetitions(dataset_metrics.combined_activationScore);
         metric_name = 'Combined Activation Score';
+    elseif strcmpi(metric_type, 'multiplied')
+        % Multiply kernel and activation metrics
+        kernel_avg = average_over_repetitions(dataset_metrics.kernel_quality_final);
+        activation_avg = average_over_repetitions(dataset_metrics.activation_similarity_final);
+        metric_data = kernel_avg .* activation_avg;
+        metric_name = 'Kernel × Activation';
     else
-        error('metric_type must be ''kernel'' or ''combined''');
+        error('metric_type must be ''kernel'', ''combined'', or ''multiplied''');
     end
     
     % Get parameter values
@@ -110,7 +118,7 @@ function h = plot_3D_slice(SNR_values, Nobs_values, metric_slice, title_str)
     ax = gca;
     ax.XScale = 'linear';  % Nobs in linear scale
     ax.YScale = 'linear';  % SNR in linear scale
-    
+    axis square
     % Set tick values
     ax.XTick = Nobs_values;
     ax.YTick = SNR_values;
