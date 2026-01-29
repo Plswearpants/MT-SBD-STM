@@ -15,14 +15,13 @@ function [] = init_sbd( mode, setdefconfig )
     % Check if ManOpt has been imported
     if exist('trustregions', 'file') ~= 2
         error('Manopt needs to be imported: <a href="http://www.manopt.org">http://www.manopt.org</a>.%s','');
-    end
-    
-    % Add subdirectories to path
+    end    % Add subdirectories to path
     fp = [fileparts(mfilename('fullpath')) '/'];
     addpath(fp);
-    for d = {'core', 'utils', 'config'}
-        addpath(genpath([fp d{1}]));
-    end
+    addpath(genpath([fp 'src']));      % All internal source code
+    addpath(genpath([fp 'config']));   % Configuration
+    addpath(genpath([fp 'lib']));      % Third-party libraries
+
     
     % Apply default config settings
     if setdefconfig;    default_config_settings(mode);  end;

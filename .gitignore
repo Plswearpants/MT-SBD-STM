@@ -9,7 +9,10 @@ slprj/
 # Results and data directories
 examples/results/
 *.pptx
-tests/
+tests/save_ws/
+tests/Multi_kernel_param_phase_space/
+tests/*.mat
+tests/*.txt
 projects/
 session/
 # STM grid data files
