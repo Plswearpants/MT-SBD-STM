@@ -162,13 +162,27 @@ Contains detailed analysis results:
 ## Proliferation Parameters
 
 ### Block: IP01A (Initialize-Proliferation-01-A)
-### Function: `initialize_kernels_proliferation.m`
+### Function: `initializeProliferation.m` (wrapper); core: `initialize_kernels_proliferation.m`
 
 | Parameter | Type | Units | Range | Default | Description |
 |-----------|------|-------|-------|---------|-------------|
 | **window_type_proliferation** | cell | - | see IN01A | {'gaussian', 2.5} | Window function for proliferated kernels |
 | **interactive_size_adjust** | logical | - | {true, false} | false | Allow interactive kernel size adjustment during proliferation |
-| **use_matrix_format** | logical | - | {true, false} | true | Output format: true = 3D matrix [H×W×S], false = cell array {S×K} |
+| **use_matrix_format** | logical | - | {true, false} | true | Output format: true = cell {K×1} with 3D arrays [H×W×S], false = cell {S×K} only |
+| **show_reference_kernels** | logical | - | {true, false} | true | Display proliferated kernels for reference slice |
+| **A1_matrix_unify_size** | string | - | see below | 'max_per_kernel' | How to unify sizes when building A1_all_matrix (sizes can differ per slice) |
+
+**A1_matrix_unify_size options:**  
+- `'max_per_kernel'` – Pad each slice to max height/width over all slices for that kernel (matches DA01A `kernel_sizes_used`).  
+- `'ref_slice'` – Use reference-slice dimensions; pad or center-crop other slices to match.
+
+#### Output (in `data.proliferation`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| **A1_all** | cell {S×K} | Theoretical kernel per slice (sizes may differ per slice) |
+| **A1_all_matrix** | cell {K×1} | 3D arrays [H×W×S] per kernel, unified size via A1_matrix_unify_size (if use_matrix_format) |
+| **kernel_centers** | array [K×2] | Centers [y,x] used for proliferation (from IS01A) |
 
 ---
 
@@ -235,8 +249,14 @@ data.X_ref          % [H × W × K] - Activation maps for reference slice
 data.b_ref          % [K × 1] - Bias terms for each kernel
 
 % After IS01A (Find Isolated Points)
-data.kernel_centers % [K × 2] - Most isolated points [y, x] for each kernel
-data.A0_used        % {S × K} - Ground truth kernels (padded if needed for 3D)
+data.mcsbd_slice.kernel_centers % [K × 2] - Most isolated points [y, x]
+data.mcsbd_slice.A0_used        % {S × K} - Ground truth kernels (padded if needed)
+data.mcsbd_slice.most_isolated_points % {1 × K} - Selected centers (cell)
+
+% After IP01A (Initialize Proliferation)
+data.proliferation.A1_all       % {S × K} - Initialized kernels per slice
+data.proliferation.A1_all_matrix % {K × 1} - 3D arrays [H × W × S] per kernel
+data.proliferation.kernel_centers % [K × 2] - Centers used for proliferation
 ```
 
 Where:

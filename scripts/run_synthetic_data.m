@@ -71,8 +71,8 @@ end
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
-params.synGen.SNR = 5;                        % Signal-to-noise ratio
-params.synGen.N_obs = 30;                     % Observation lattice size (pixels)
+params.synGen.SNR = 2;                        % Signal-to-noise ratio
+params.synGen.N_obs = 50;                     % Observation lattice size (pixels)
 params.synGen.observation_resolution = 3;     % Resolution: pixels per lattice site
 params.synGen.defect_density = 0.01;          % Surface defect density (0-1)
 params.synGen.num_slices = 2;                 % Number of energy slices
@@ -204,7 +204,7 @@ end
 % Phase I settings
 params.mcsbd_slice.initial_iteration = 1;          % Manopt/FISTA inner iterations (start)
 params.mcsbd_slice.maxIT = 15;                     % Number of outer alternating iterations
-params.mcsbd_slice.lambda1 = 3e-2;                 % L1 regularization (Phase I) - scalar or vector
+params.mcsbd_slice.lambda1 = 5e-2;                 % L1 regularization (Phase I) - scalar or vector
 
 % Phase II settings (refinement)
 params.mcsbd_slice.phase2_enable = false;          % Enable Phase II refinement
@@ -280,7 +280,7 @@ clearvars show_distributions show_isolation_maps
 %  centers to initialize kernels across all energy slices. This "proliferation"
 %  approach ensures consistent spatial positioning across the energy dimension.
 %
-%  Dependencies: initialize_kernels_proliferation.m
+%  Dependencies: initializeProliferation.m (wrapper), initialize_kernels_proliferation.m
 
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
@@ -288,184 +288,54 @@ clearvars show_distributions show_isolation_maps
 window_type_proliferation = {'gaussian', 2.5};  % Window function
 interactive_size_adjust = false;                % Allow interactive resizing
 use_matrix_format = true;                       % Output as matrix vs cell array
+% How to unify kernel sizes in A1_all_matrix when they differ per slice:
+%   'max_per_kernel' - pad each slice to max H,W over slices (default; matches DA01A)
+%   'ref_slice'      - use reference-slice dimensions; pad/crop others to match
+A1_matrix_unify_size = 'max_per_kernel';
 
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% LOG: Block start
-LOGcomment = sprintf("Window: %s, Interactive: %d, Matrix: %d", ...
-    mat2str(window_type_proliferation), interactive_size_adjust, use_matrix_format);
+% LOG: Block start (format window_type for log)
+LOGcomment = sprintf("Window: %s, Interactive: %d, Matrix: %d, Unify: %s", ...
+    formatWindowType(window_type_proliferation), interactive_size_adjust, use_matrix_format, A1_matrix_unify_size);
 LOGcomment = logUsedBlocks(log.path, log.file, "IP01A", LOGcomment, 0);
 
-fprintf('Initializing kernels for all %d slices using proliferation...\n', params.num_slices);
-
-% Convert most_isolated_points to matrix format
-kernel_centers = zeros(params.num_kernels, 2);
-for k = 1:params.num_kernels
-    if ~isempty(data.mcsbd_slice.most_isolated_points{k})
-        kernel_centers(k,:) = data.mcsbd_slice.most_isolated_points{k};
-    else
-        error('No isolated point found for kernel %d', k);
-    end
-end
-
-% Initialize kernels for all slices
-A1_all = cell(params.num_slices, params.num_kernels);
-
-for s = 1:params.num_slices
-    fprintf('  Slice %d/%d...', s, params.num_slices);
-    
-    if strcmp(params.target_kernel_size_type, 'kernel_sizes_all') || ndims(params.target_kernel_sizes) == 3
-        % Use slice-specific kernel sizes
-        target_sizes_slice = squeeze(params.kernel_sizes(s,:,:));
-    else
-        % Use uniform kernel sizes
-        target_sizes_slice = params.target_kernel_sizes;
-    end
-    
-    A1_all(s,:) = initialize_kernels_proliferation(data.synGen.Y(:,:,s), params.num_kernels, ...
-        kernel_centers, window_type_proliferation, target_sizes_slice, ...
-        'interactive', interactive_size_adjust);
-    
-    fprintf(' done.\n');
-end
-
-% Visualize initialized kernels for reference slice
-figure('Name', 'IP01A: Initialized Kernels (Reference Slice)');
-for k = 1:params.num_kernels
-    subplot(1, params.num_kernels, k);
-    imagesc(A1_all{params.ref_slice, k});
-    colormap(gray);
-    colorbar;
-    title(sprintf('Initialized Kernel %d', k));
-    axis square;
-end
-sgtitle(sprintf('Proliferated Kernels - Slice %d', params.ref_slice));
-
-% Store initialization results
-init_results = struct();
-init_results.A = A1_all;
-init_results.kernel_centers = kernel_centers;
-init_results.kernel_sizes = params.target_kernel_sizes;
-
-fprintf('Kernel initialization complete for all slices.\n\n');
-
-% Convert to matrix format if requested
-if use_matrix_format
-    A1_all_matrix = cell(params.num_kernels, 1);
-    for k = 1:params.num_kernels
-        A1_all_matrix{k} = zeros(size(A1_all{1,k},1), size(A1_all{1,k},2), params.num_slices);
-        for s = 1:params.num_slices
-            A1_all_matrix{k}(:,:,s) = A1_all{s,k};
-        end
-    end
-    fprintf('Converted to matrix format: %d kernels x [%dx%dx%d]\n\n', ...
-        params.num_kernels, size(A1_all_matrix{1},1), size(A1_all_matrix{1},2), params.num_slices);
-end
-
-% LOG: Initialization complete
-LOGcomment = sprintf("Initialized %d kernels for %d slices at centers: %s", ...
-    params.num_kernels, params.num_slices, mat2str(kernel_centers));
-LOGcomment = logUsedBlocks(log.path, log.file, "  ^  ", LOGcomment, 0);
+% Initialize kernels for all slices (wrapper handles visualization and logging)
+[data, params] = initializeProliferation(log, data, params, ...
+    'window_type_proliferation', window_type_proliferation, ...
+    'interactive_size_adjust', interactive_size_adjust, ...
+    'use_matrix_format', use_matrix_format, ...
+    'A1_matrix_unify_size', A1_matrix_unify_size);
 
 % Clear preset variables
-clearvars window_type_proliferation interactive_size_adjust use_matrix_format
-clearvars kernel_centers target_sizes_slice s k
+clearvars window_type_proliferation interactive_size_adjust use_matrix_format A1_matrix_unify_size
 
 
 %% =========================================================================
 %% DA01A: Decompose-All-01-A; Decompose All Slices Simultaneously
 %  =========================================================================
-%  Edited by Dong Chen, 2025-10-27
-%
-%  Runs MT-SBD on all energy slices simultaneously, using the reference
-%  slice activation as initialization. This leverages 3D convolution for
-%  efficient multi-slice processing.
-%
-%  Dependencies: MTSBD_synthetic_all_slice.m, convfft3.m
+%  Runs MT-SBD on all energy slices using proliferated kernel initialization.
+%  Dependencies: decomposeAllSlices.m
 
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
-% Use reference slice results as initialization
 use_reference_init = true;          % Initialize X with reference results
-
-% Display options
 show_allslice_progress = true;      % Show progress during optimization
-
-% Algorithm parameters inherited from DS01A
 maxIT_allslice = 15;                % Max iterations for all-slice decomposition
 
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% LOG: Block start
-LOGcomment = sprintf("Init from ref: %d, maxIT=%d", use_reference_init, maxIT_allslice);
-LOGcomment = logUsedBlocks(log.path, log.file, "DA01A", LOGcomment, 0);
-
-fprintf('Running MT-SBD decomposition on all %d slices...\n', params.num_slices);
-
-% Prepare kernel sizes and observation
-kernel_sizes_used = squeeze(max(params.kernel_sizes, [], 1));
-Y_used = data.synGen.Y;
-A1_used = A1_all_matrix;
-
-% Set up display functions
-if show_allslice_progress
-    figure('Name', 'DA01A: All-Slice Decomposition Progress');
-    dispfun_allslice = cell(1, params.num_kernels);
-    for n = 1:params.num_kernels
-        dispfun_allslice{n} = @(Y, A, X, kernel_sizes, kplus) ...
-            showims(Y_used, A1_used{n}, data.synGen.X0_ref(:,:,n), A, X, kernel_sizes, kplus, 1);
-    end
-else
-    dispfun_allslice = cell(1, params.num_kernels);
-    for n = 1:params.num_kernels
-        dispfun_allslice{n} = @(Y, A, X, kernel_sizes, kplus) 0;
-    end
-end
-
-% Update parameters for all-slice processing
-params_allslice = ref_results.params;
-params_allslice.X0 = data.synGen.X0;
-params_allslice.A0 = data.mcsbd_slice.A0_used;
-
-% Initialize X from reference slice if requested
-if use_reference_init
-    params_allslice.xinit = cell(1, params.num_kernels);
-    for k = 1:params.num_kernels
-        params_allslice.xinit{k}.X = data.mcsbd_slice.X(:,:,k);
-        b_temp = ref_results.extras.phase1.biter(k);
-        params_allslice.xinit{k}.b = repmat(b_temp, [params.num_slices, 1]);
-    end
-else
-    params_allslice.xinit = [];
-end
-
-% Run all-slice decomposition
-tic;
-[Aout_slice, Xout_slice, bout_slice, slice_extras] = MTSBD_synthetic_all_slice(...
-    Y_used, kernel_sizes_used, params_allslice, dispfun_allslice, A1_used, initial_iteration, maxIT_allslice);
-allslice_time = toc;
-
-fprintf('All-slice decomposition completed in %.2f seconds.\n', allslice_time);
-
-% Store all-slice results
-allslice_results = struct();
-allslice_results.A = Aout_slice;
-allslice_results.X = Xout_slice;
-allslice_results.b = bout_slice;
-allslice_results.extras = slice_extras;
-allslice_results.params = params_allslice;
-
-fprintf('Multi-slice decomposition complete.\n\n');
-
-% LOG: All-slice results
-LOGcomment = sprintf("Completed in %.2fs for %d slices", allslice_time, num_slices);
-LOGcomment = logUsedBlocks(log.path, log.file, "  ^  ", LOGcomment, 0);
+% Decompose all slices (wrapper handles logging and structure conversion)
+fprintf('Decomposing all slices...\n');
+[data, params] = decomposeAllSlices(log, data, params, ...
+    'use_reference_init', use_reference_init, ...
+    'maxIT_allslice', maxIT_allslice, ...
+    'show_allslice_progress', show_allslice_progress);
+fprintf('All-slice decomposition complete.\n\n');
 
 % Clear preset variables
 clearvars use_reference_init show_allslice_progress maxIT_allslice
-clearvars kernel_sizes_used Y_used A1_used dispfun_allslice
-clearvars params_allslice b_temp allslice_time n k
 
 
 %% =========================================================================
@@ -488,15 +358,15 @@ fprintf('========================================\n\n');
 
 
 %% =========================================================================
-%% VR01A: Visualize-Results-01-A; Visualize All Results
+%% VR01A: DEFERRED - Visualization block to be updated later
 %  =========================================================================
-%  Edited by Dong Chen, 2025-10-27
+%  TODO: Create visualizeResults.m wrapper following same pattern as
+%        decomposeReferenceSlice.m and decomposeAllSlices.m
 %
-%  Comprehensive visualization of decomposition results for all slices,
-%  including reconstructions, activations, kernels, and quality metrics.
-%
-%  Dependencies: visualizeResults.m
+%  Original block visualized decomposition results for all slices.
+%  Dependencies: visualizeResults.m (wrapper to be created)
 
+if false  % DISABLED - to be implemented
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
@@ -529,7 +399,7 @@ end
 % Visualize results for each selected slice
 for s = slices_to_viz
     fprintf('  Visualizing slice %d/%d...\n', s, params.num_slices);
-    
+
     % Prepare slice-specific data
     Y_slice = data.synGen.Y(:,:,s);
     A0_slice = cell(1, params.num_kernels);
@@ -544,11 +414,11 @@ for s = slices_to_viz
     for k = 1:params.num_kernels
         Aout_slice_cell{k} = Aout_cell{s,k};
     end
-    
+
     % Call visualizeResults for this slice
     visualizeResults(Y_slice, A0_slice, Aout_slice_cell, data.synGen.X0, Xout_slice, ...
         bout_slice(s,:), slice_extras, [s, 1]);
-    
+
     % Save figures if requested
     if save_figures
         fig_name = sprintf('%s_slice%02d_results', log.file, s);
@@ -568,15 +438,16 @@ LOGcomment = logUsedBlocks(log.path, log.file, "  ^  ", LOGcomment, 0);
 clearvars visualize_all_slices save_figures slices_to_viz fig_name
 clearvars Y_slice A0_slice Aout_slice_cell s k
 
+end  % if false (VR01A DISABLED)
+
 
 %% =========================================================================
-%% WS01A: Write-Save-01-A; Save Workspace and Results
+%% WS01A: DEFERRED - Workspace save block to be updated later
 %  =========================================================================
-%  Edited by Dong Chen, 2025-10-27
-%
-%  Saves the complete workspace including all results, parameters, and
-%  intermediate data for later analysis. Also saves the log file.
+%  NOTE: saveRun() already handles saving. This block is redundant.
+%  TODO: Remove or repurpose this block in future cleanup.
 
+if false  % DISABLED - saveRun() handles this functionality
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
@@ -592,11 +463,11 @@ LOGcomment = logUsedBlocks(log.path, log.file, "WS01A", LOGcomment, 0);
 
 if save_workspace || save_results_only
     fprintf('Saving results...\n');
-    
+
     % Create results filename
     results_filename = sprintf('%s_results.mat', log.file);
     results_fullpath = fullfile(results_path, results_filename);
-    
+
     if save_results_only
         % Save only essential results
         save(results_fullpath, 'Y', 'A0', 'X0', 'params', ...
@@ -608,17 +479,17 @@ if save_workspace || save_results_only
         save(results_fullpath, '-v7.3');
         fprintf('Complete workspace saved to: %s\n', results_fullpath);
     end
-    
+
     % Copy log file to results location
     log_source = fullfile(log.path, [log.file '_log.file.txt']);
     log_dest = fullfile(results_path, [log.file '_log.file.txt']);
     if ~strcmp(log_source, log_dest)
         copyfile(log_source, log_dest);
     end
-    
+
     fprintf('Log file saved to: %s\n', log_dest);
     fprintf('\n');
-    
+
     % LOG: Save complete
     LOGcomment = sprintf("Saved to: %s", results_filename);
     LOGcomment = logUsedBlocks(log.path, log.file, "  ^  ", LOGcomment, 0);
@@ -627,6 +498,8 @@ end
 % Clear preset variables
 clearvars save_workspace save_results_only results_path
 clearvars results_filename results_fullpath log_source log_dest
+
+end  % if false (WS01A DISABLED)
 
 
 %% =========================================================================

@@ -214,6 +214,7 @@ function [data, params] = decomposeReferenceSlice(log, data, params, varargin)
     LOGcomment = logUsedBlocks(log.path, log.file, "  ^  ", LOGcomment, 0);
     
     % Store results in data
+    data.A = A_ref;
     data.X = X_ref;
     data.b = bout;
     data.extras = extras;

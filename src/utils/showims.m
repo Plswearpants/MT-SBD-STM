@@ -40,7 +40,7 @@ function showims(Y, A0, X0, A, X, k, kplus, idx)
         % Row 2: Recovered observation | Current estimated kernel | Current estimated activation
         nexttile;
         img_handles(4) = imagesc(Y_hat);
-        axis image off; title('Ŷ (Recovered)');
+        axis image off; title('Ŷ_channel (Recovered)');
         
         nexttile;
         img_handles(5) = imagesc(abs(A(:,:,idx)));

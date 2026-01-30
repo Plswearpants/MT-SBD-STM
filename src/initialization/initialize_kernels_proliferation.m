@@ -132,9 +132,9 @@ function A1 = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, w
         
         % Extract region
         selected_kernel = Y(y1:y2, x1:x2);
-        % Ensure selected_kernel matches target_kernel_size
+        % Ensure selected_kernel matches target_kernel_size for this kernel (row n)
         current_size = size(selected_kernel);
-        target_size = target_kernel_size; % [height, width]
+        target_size = target_kernel_size(n,:); % [height, width] for kernel n
 
         % Pad if too small
         pad_height = max(0, target_size(1) - current_size(1));
@@ -143,14 +143,20 @@ function A1 = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, w
             selected_kernel = padarray(selected_kernel, [pad_height, pad_width], 'replicate', 'post');
         end
 
-        % Crop if too large
+        % Crop if too large (to exact target size for this kernel)
         selected_kernel = selected_kernel(1:target_size(1), 1:target_size(2));
-        
-        % Project onto the oblique manifold and apply window
+
+        % Project onto the oblique manifold
         A1{n} = proj2oblique(selected_kernel);
-        disp(size(A1{n}));
+        % windowToKernel requires square: pad to square if rectangular
+        [h, w] = size(A1{n});
+        if h ~= w
+            side = max(h, w);
+            A1{n} = padarray(A1{n}, [side - h, side - w], 'replicate', 'post');
+            A1{n} = A1{n}(1:side, 1:side);
+        end
         A1{n} = apply_window(A1{n}, window_type);
-        
+
         fprintf('Kernel %d initialized at center (%d,%d) with size [%d,%d]\n', ...
             n, center_y, center_x, kernel_sizes(n,1), kernel_sizes(n,2));
     end
