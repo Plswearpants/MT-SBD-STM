@@ -8,7 +8,7 @@ function [data, params, isolation_results] = findIsolatedPoints(log, data, param
 %
 %   INPUTS:
 %       log                 - Log struct with .path and .file fields
-%       data                - Data struct from previous blocks (must contain data.mcsbd_slice from DS01A)
+%       data                - Data struct from previous blocks (must contain data.slice from DS01A; or flat after extract)
 %       params              - Parameter struct from previous blocks (hierarchical or flat)
 %
 %       OPTIONAL (Name-Value pairs):
@@ -23,13 +23,13 @@ function [data, params, isolation_results] = findIsolatedPoints(log, data, param
 %
 %   OUTPUTS:
 %       data                - Updated data struct with new fields in mcsbd_slice:
-%                             data.mcsbd_slice.kernel_centers - [K×2] most isolated points
-%                             data.mcsbd_slice.A0_used - Ground truth kernels (padded)
-%                             data.mcsbd_slice.defect_positions - All defect locations
-%                             data.mcsbd_slice.most_isolated_points - Selected centers
-%                             data.mcsbd_slice.isolation_scores - Distance scores
-%                             data.mcsbd_slice.num_defects - Count per kernel
-%                             data.mcsbd_slice.offset - Alignment offset
+%                             data.slice.kernel_centers - [K×2] most isolated points
+%                             data.slice.A0_used - Ground truth kernels (padded)
+%                             data.slice.defect_positions - All defect locations
+%                             data.slice.most_isolated_points - Selected centers
+%                             data.slice.isolation_scores - Distance scores
+%                             data.slice.num_defects - Count per kernel
+%                             data.slice.offset - Alignment offset
 %       params              - Updated parameter struct with:
 %                             params.target_kernel_sizes - Sizes for 3D initialization
 %
@@ -70,7 +70,7 @@ function [data, params, isolation_results] = findIsolatedPoints(log, data, param
     end
     
     % Extract data from hierarchical structure (if needed)
-    if isfield(data, 'synGen') || isfield(data, 'mcsbd_slice')
+    if isfield(data, 'synGen') || isfield(data, 'slice') || isfield(data, 'mcsbd_slice')
         data = organizeData(data, 'extract');
     end
     

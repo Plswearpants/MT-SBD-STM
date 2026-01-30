@@ -12,7 +12,7 @@
 2. [Kernel Initialization Parameters](#kernel-initialization-parameters)
 3. [Decomposition Parameters](#decomposition-parameters)
 4. [Isolation Analysis Parameters](#isolation-analysis-parameters)
-5. [Proliferation Parameters](#proliferation-parameters)
+5. [Block Initialization Parameters (IB01A)](#block-initialization-parameters-ib01a)
 6. [Visualization Parameters](#visualization-parameters)
 7. [Data Structures](#data-structures)
 
@@ -159,44 +159,63 @@ Contains detailed analysis results:
 
 ---
 
-## Proliferation Parameters
+## Block Initialization Parameters (IB01A)
 
-### Block: IP01A (Initialize-Proliferation-01-A)
-### Function: `initializeProliferation.m` (wrapper); core: `initialize_kernels_proliferation.m`
+### Block: IB01A (Initialize-Block-01-A)
+### Function: `initializeBlock.m` (unified wrapper); dispatches to `initializeProliferation.m` or block_manual path; core: `initialize_kernels_proliferation.m`
+
+Single entry point for initializing kernels across all slices. **Method** (`block_init_method`) selects how centers are obtained:
 
 | Parameter | Type | Units | Range | Default | Description |
 |-----------|------|-------|-------|---------|-------------|
-| **window_type_proliferation** | cell | - | see IN01A | {'gaussian', 2.5} | Window function for proliferated kernels |
-| **interactive_size_adjust** | logical | - | {true, false} | false | Allow interactive kernel size adjustment during proliferation |
-| **use_matrix_format** | logical | - | {true, false} | true | Output format: true = cell {K×1} with 3D arrays [H×W×S], false = cell {S×K} only |
-| **show_reference_kernels** | logical | - | {true, false} | true | Display proliferated kernels for reference slice |
-| **A1_matrix_unify_size** | string | - | see below | 'max_per_kernel' | How to unify sizes when building A1_all_matrix (sizes can differ per slice) |
+| **block_init_method** | string | - | see below | 'proliferation' | How to obtain block initialization |
+| **A1_matrix_unify_size** | string | - | see below | 'max_per_kernel' | How to unify sizes when building A_all_init_matrix (default for block_manual) |
+| **window_type_proliferation** | cell | - | see IN01A | {'gaussian', 2.5} | Window function for block-initialized kernels |
+| **interactive_size_adjust** | logical | - | {true, false} | false | Allow interactive kernel size adjustment |
+| **use_matrix_format** | logical | - | {true, false} | true | Output A_all_init_matrix as {K×1} [H×W×S]; false = cell {S×K} only |
+| **show_reference_kernels** | logical | - | {true, false} | true | Display initialized kernels for reference slice |
+
+**block_init_method options:**  
+- `'proliferation'` – Use most isolated points from IS01A as centers; initialize kernels at those positions on every slice. Requires IS01A and `target_kernel_sizes`.  
+- `'block_manual'` – Always runs manual ref-slice selection (same as IK01A); previous data.slice is not used (manual overwrites it). Centers are derived from the new ref-slice kernels and propagated to all slices. Kernel size default: `A1_matrix_unify_size = 'max_per_kernel'`.
 
 **A1_matrix_unify_size options:**  
-- `'max_per_kernel'` – Pad each slice to max height/width over all slices for that kernel (matches DA01A `kernel_sizes_used`).  
+- `'max_per_kernel'` – Pad each slice to max height/width over all slices for that kernel (matches DA01A).  
 - `'ref_slice'` – Use reference-slice dimensions; pad or center-crop other slices to match.
 
-#### Output (in `data.proliferation`)
+#### Output (in `data.block`)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| **A1_all** | cell {S×K} | Theoretical kernel per slice (sizes may differ per slice) |
-| **A1_all_matrix** | cell {K×1} | 3D arrays [H×W×S] per kernel, unified size via A1_matrix_unify_size (if use_matrix_format) |
-| **kernel_centers** | array [K×2] | Centers [y,x] used for proliferation (from IS01A) |
+| **A_all_init** | cell {S×K} | Initialized kernel per slice (sizes may differ per slice) |
+| **A_all_init_matrix** | cell {K×1} | 3D arrays [H×W×S] per kernel, unified via A1_matrix_unify_size (if use_matrix_format) |
+| **init_kernel_centers** | array [K×2] | Centers [y,x] used (from IS01A for proliferation; from ref for block_manual) |
 
 ---
 
-## All-Slice Decomposition Parameters
+## All-Slice Decomposition Parameters (Block)
 
 ### Block: DA01A (Decompose-All-01-A)
-### Function: `MTSBD_synthetic_all_slice.m`
+### Function: `decomposeAllSlices.m` (wrapper); core: `MTSBD_synthetic_all_slice.m`
+
+Standardized wrapper: uses organizeData/organizeParams for inputs/outputs. Algorithm parameters (initial_iteration, maxIT, lambda1, phase2_enable, lambda2, nrefine, kplus_factor, signflip_threshold, xpos, getbias, Xsolve_method) are inherited from params.slice (DS01A). Block-specific presets below.
 
 | Parameter | Type | Units | Range | Default | Description |
 |-----------|------|-------|-------|---------|-------------|
-| **use_Xregulated_allslice** | logical | - | {true, false} | false | Use X-regularized version for all-slice processing |
-| **use_reference_init** | logical | - | {true, false} | true | Initialize X from reference slice results |
+| **use_reference_init** | logical | - | {true, false} | true | Initialize X from reference slice (DS01A) results |
 | **show_allslice_progress** | logical | - | {true, false} | true | Display optimization progress during all-slice decomposition |
-| **maxIT_allslice** | integer | iterations | > 0 | 15 | Maximum iterations for all-slice decomposition |
+| **maxIT_allslice** | integer | iterations | > 0 | 15 | Maximum outer iterations for all-slice decomposition |
+
+#### Output (in `data.block`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| **Aout_all** | cell {K×1} | Deconvolved kernels [H×W×S] per kernel |
+| **Xout_all** | array [H×W×K] | Activation maps |
+| **bout_all** | array [S×K] | Bias terms |
+| **extras_all** | struct | Optimization details (phase1, phase2, runtime, etc.) |
+
+**Requires:** IB01A (data.block.A_all_init_matrix), DS01A (data.slice for ref init and algo params), data.Y, data.X0.
 
 ---
 
@@ -240,24 +259,33 @@ data.Y_ref          % [H × W] - Reference slice observation
 data.X0_ref         % [H × W × K] - Reference activations
 data.A0_ref         % {1 × K} - Reference kernels (ground truth)
 
-% After IN01A (Initialize Kernels)
-data.A1             % {1 × K} - Initialized kernels for reference slice
+% After IN01A (Initialize Kernels) – in data.slice
+data.slice.A_init   % {1 × K} - Initialized kernels for reference slice
+data.slice.init_kernel_centers % [K × 2] - Centers (empty for manual)
 
-% After DS01A (Decompose Reference Slice)
-data.A_ref          % {1 × K} - Decomposed/refined kernels for reference slice
-data.X_ref          % [H × W × K] - Activation maps for reference slice
-data.b_ref          % [K × 1] - Bias terms for each kernel
+% After DS01A (Decompose Reference Slice) – in data.slice
+data.slice.A        % {1 × K} - Deconvolved kernels for reference slice
+data.slice.X        % [H × W × K] - Activation maps for reference slice
+data.slice.b        % [K × 1] - Bias terms for each kernel
 
-% After IS01A (Find Isolated Points)
-data.mcsbd_slice.kernel_centers % [K × 2] - Most isolated points [y, x]
-data.mcsbd_slice.A0_used        % {S × K} - Ground truth kernels (padded if needed)
-data.mcsbd_slice.most_isolated_points % {1 × K} - Selected centers (cell)
+% After IS01A (Find Isolated Points) – in data.slice
+data.slice.kernel_centers       % [K × 2] - Most isolated points [y, x]
+data.slice.A0_used              % {S × K} - Ground truth kernels (padded if needed)
+data.slice.most_isolated_points % {1 × K} - Selected centers (cell)
 
-% After IP01A (Initialize Proliferation)
-data.proliferation.A1_all       % {S × K} - Initialized kernels per slice
-data.proliferation.A1_all_matrix % {K × 1} - 3D arrays [H × W × S] per kernel
-data.proliferation.kernel_centers % [K × 2] - Centers used for proliferation
+% After IB01A (Initialize Block)
+data.block.A_all_init           % {S × K} - Initialized kernels per slice
+data.block.A_all_init_matrix   % {K × 1} - 3D arrays [H × W × S] per kernel
+data.block.init_kernel_centers  % [K × 2] - Centers used for block init
+
+% After DA01A (Decompose All Slices) – in data.block
+data.block.Aout_all   % {K×1} - Deconvolved kernels [H×W×S]
+data.block.Xout_all   % [H×W×K] - Activations
+data.block.bout_all   % [S×K] - Bias terms
+data.block.extras_all % Optimization details
 ```
+
+**Note:** Block init (IB01A) and DA01A write to params.block and data.block; blocks before IB01A do not write to block.
 
 Where:
 - H = height in pixels
@@ -267,28 +295,18 @@ Where:
 
 ### `params` Struct (Parameters and Metadata)
 
-Contains all scalar parameters, strings, and small arrays:
+Stored hierarchically as `params.synGen`, `params.slice`, `params.block`; `organizeParams(..., 'extract')` flattens to a single struct for use in functions.
 
+**Hierarchical layout:**
+- **params.synGen** – Data generation (SNR, N_obs, num_slices, kernel_sizes, LDoS_path, …).
+- **params.slice** – Single-slice: init (init_method, init_window, kernel_selection_type, kernel_sizes_ref) and decomposition (initial_iteration, maxIT, lambda1, phase2_enable, …).
+- **params.block** – Block init (IB01A): block_init_method, A1_matrix_unify_size, window_type_proliferation, etc. DA01A: maxIT_allslice, use_reference_init, show_allslice_progress. Written by IB01A and DA01A.
+
+**Flat (after extract):**
 ```matlab
-% Input parameters
-params.SNR                      % Signal-to-noise ratio
-params.N_obs                    % Observation lattice size
-params.observation_resolution   % Pixels per lattice site
-params.defect_density           % Surface defect density
-params.num_slices               % Number of energy slices
-params.LDoS_path                % Path to LDoS data
-
-% Derived parameters
-params.num_kernels              % Number of kernels
-params.ref_slice                % Reference slice index
-params.kernel_sizes             % [S × K × 2] kernel dimensions
-
-% Algorithm parameters
-params.lambda1                  % [K × 1] regularization
-params.phase2                   % Boolean for Phase II
-params.xpos                     % Boolean for positivity
-params.Xsolve                   % Solver type string
-% ... etc
+params.SNR, params.N_obs, params.num_slices, params.LDoS_path, params.num_kernels, params.ref_slice
+params.init_method, params.init_window, params.initial_iteration, params.maxIT, params.lambda1
+params.phase2_enable, params.xpos, params.Xsolve_method, ...
 ```
 
 ### `extras` Struct (Detailed Results)
@@ -393,7 +411,7 @@ workspace_directory/
   - Documented GD01A (Data Generation) parameters
   - Documented IN01A (Kernel Initialization) parameters
   - Documented DS01A (Decomposition) parameters
-  - Documented IS01A, IP01A, DA01A, VR01A, WS01A parameters
+  - Documented IS01A, IB01A (block init), DA01A, VR01A, WS01A parameters
   - Defined data structures (data, params, extras)
 
 ---

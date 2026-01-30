@@ -8,7 +8,7 @@ function [meta] = saveRun(log, data, params, meta, varargin)
 %
 %   INPUTS:
 %       log                 - Log struct with .path and .file fields
-%       data                - Data struct with mcsbd_slice or mcsbd_block fields
+%       data                - Data struct with slice and/or block fields (or legacy mcsbd_slice/mcsbd_block)
 %       params              - Parameter struct with all settings
 %       meta                - Metadata struct with project_path
 %
@@ -87,11 +87,11 @@ function [meta] = saveRun(log, data, params, meta, varargin)
     end
     
     % Check that data contains algorithm results
-    has_slice_results = isfield(data, 'mcsbd_slice') && isstruct(data.mcsbd_slice);
-    has_block_results = isfield(data, 'mcsbd_block') && isstruct(data.mcsbd_block);
+    has_slice_results = (isfield(data, 'slice') && isstruct(data.slice)) || (isfield(data, 'mcsbd_slice') && isstruct(data.mcsbd_slice));
+    has_block_results = (isfield(data, 'block') && isstruct(data.block)) || (isfield(data, 'mcsbd_block') && isstruct(data.mcsbd_block));
     
     if ~has_slice_results && ~has_block_results
-        error('Data struct must contain mcsbd_slice or mcsbd_block field');
+        error('Data struct must contain slice or block field');
     end
     
     % Determine run type

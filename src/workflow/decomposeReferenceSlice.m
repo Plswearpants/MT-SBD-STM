@@ -36,15 +36,15 @@ function [data, params] = decomposeReferenceSlice(log, data, params, varargin)
 %
 %   OUTPUTS:
 %       data                - Updated data struct with new fields in mcsbd_slice:
-%                             data.mcsbd_slice.A - Deconvolved kernels
-%                             data.mcsbd_slice.X - Activation maps
-%                             data.mcsbd_slice.b - Bias terms
-%                             data.mcsbd_slice.extras - Optimization info
-%                             data.mcsbd_slice.mtsbd_time - Execution time
-%                             data.mcsbd_slice.final_metrics - Activation metrics
-%                             data.mcsbd_slice.final_kernel_quality - Kernel quality
+%                             data.slice.A - Deconvolved kernels
+%                             data.slice.X - Activation maps
+%                             data.slice.b - Bias terms
+%                             data.slice.extras - Optimization info
+%                             data.slice.mtsbd_time - Execution time
+%                             data.slice.final_metrics - Activation metrics
+%                             data.slice.final_kernel_quality - Kernel quality
 %       params              - Updated parameter struct with MT-SBD settings
-%       results             - Results struct (for backward compatibility, contains same as data.mcsbd_slice)
+%       results             - Results struct (for backward compatibility, contains same as data.slice)
 %
 %   DESCRIPTION:
 %       This wrapper encapsulates the MT-SBD (Multi-kernel Tensor Shifted
@@ -82,7 +82,7 @@ function [data, params] = decomposeReferenceSlice(log, data, params, varargin)
     end
     
     % Extract data from hierarchical structure (if needed)
-    if isfield(data, 'synGen') || isfield(data, 'mcsbd_slice')
+    if isfield(data, 'synGen') || isfield(data, 'slice') || isfield(data, 'mcsbd_slice')
         data = organizeData(data, 'extract');
     end
     

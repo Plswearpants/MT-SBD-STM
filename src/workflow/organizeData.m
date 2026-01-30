@@ -22,26 +22,22 @@ function data_out = organizeData(data_in, mode)
 %       │  ├─ Y, A0, A0_noiseless, X0
 %       │  └─ Y_ref, X0_ref, A0_ref
 %       │
-%       ├─ initialization      % Kernel initialization outputs
-%       │  ├─ A_init           % Initialized kernels (from auto/manual init)
-%       │  └─ kernel_centers   % Kernel centers from initialization (auto/manual)
-%       │
-%       ├─ mcsbd_slice         % Single-slice decomposition results
+%       ├─ slice               % Single-slice: init + decomposition (flattened)
+%       │  ├─ A_init, init_kernel_centers  % From kernel init (auto/manual)
 %       │  ├─ A, X, b          % Deconvolved kernels, activations, bias
-%       │  ├─ extras           % Optimization details
-%       │  ├─ mtsbd_time       % Execution time
-%       │  ├─ final_metrics    % Activation quality metrics
-%       │  ├─ final_kernel_quality % Kernel quality factors
-%       │  ├─ kernel_centers   % Most isolated points (from IS01A, for proliferation)
-%       │  ├─ A0_used          % Ground truth kernels used
-%       │  ├─ defect_positions % All defect locations
-%       │  ├─ most_isolated_points % Selected centers
-%       │  ├─ used_most_isolated_points % Aligned centers
-%       │  ├─ isolation_scores % Distance scores
-%       │  ├─ num_defects      % Count per kernel
-%       │  └─ offset           % Alignment offset
+%       │  ├─ extras, mtsbd_time, final_metrics, final_kernel_quality
+%       │  ├─ kernel_centers   % Most isolated points (IS01A, for block init proliferation)
+%       │  ├─ A0_used, defect_positions, most_isolated_points
+%       │  ├─ used_most_isolated_points, isolation_scores, num_defects, offset
 %       │
-%       └─ mcsbd_block         % Block/all-slice algorithm results (future)
+%       └─ block               % Block init (IB01A) + all-slice results (DA01A)
+%          Block init (unified: proliferation or block_manual) and DA01A write here.
+%          Block-init fields (from IB01A):
+%          ├─ A_all_init           % {S×K} initialized kernels per slice
+%          ├─ A_all_init_matrix    % {K×1} 3D [H×W×S] unified (default unify: max_per_kernel)
+%          ├─ init_kernel_centers  % [K×2] centers (proliferation) or empty (block_manual)
+%          DA01A result fields:
+%          ├─ Aout_all, Xout_all, bout_all, extras_all
 %
 %   FLAT STRUCTURE (internal use):
 %       data.Y, data.A0, data.X, data.A, ...
@@ -78,15 +74,19 @@ function data_hier = flatToHierarchical(data_flat)
     synGen_fields = {'Y', 'A0', 'A0_noiseless', 'X0', ...
                      'Y_ref', 'X0_ref', 'A0_ref'};
     
-    initialization_fields = {'A_init', 'init_kernel_centers'};  
+    % slice = init (ref-slice) + single-slice decomposition, flattened
+    slice_fields = {'A_init', 'init_kernel_centers', ...
+                    'A', 'X', 'b', 'extras', 'mtsbd_time', ...
+                    'final_metrics', 'final_kernel_quality', ...
+                    'kernel_centers', 'A0_used', 'defect_positions', ...
+                    'most_isolated_points', 'used_most_isolated_points', ...
+                    'isolation_scores', 'num_defects', 'offset'};
     
-    mcsbd_slice_fields = {'A', 'X', 'b', 'extras', 'mtsbd_time', ...
-                          'final_metrics', 'final_kernel_quality', ...
-                          'kernel_centers', 'A0_used', 'defect_positions', ...
-                          'most_isolated_points', 'used_most_isolated_points', ...
-                          'isolation_scores', 'num_defects', 'offset'};
-    
-    mcsbd_block_fields = {};  % Future use - all-slice decomposition results
+    % block = block-init (IB01A) + all-slice results (DA01A). Flat names: A1_all, A1_all_matrix,
+    % proliferation_kernel_centers (block init) → block.A_all_init, A_all_init_matrix, init_kernel_centers
+    block_init_flat = {'A1_all', 'A1_all_matrix', 'proliferation_kernel_centers'};
+    block_result_flat = {'Aout_all', 'Xout_all', 'bout_all', 'extras_all'};
+    block_fields = [block_init_flat, block_result_flat];
     
     % Copy synGen fields
     if any(isfield(data_flat, synGen_fields))
@@ -99,46 +99,44 @@ function data_hier = flatToHierarchical(data_flat)
         end
     end
     
-    % Copy initialization fields (if they exist)
-    if any(isfield(data_flat, initialization_fields))
-        data_hier.initialization = struct();
-        for i = 1:length(initialization_fields)
-            field = initialization_fields{i};
+    % Copy slice fields (init + single-slice decomposition)
+    if any(isfield(data_flat, slice_fields))
+        data_hier.slice = struct();
+        for i = 1:length(slice_fields)
+            field = slice_fields{i};
             if isfield(data_flat, field)
-                % Special mapping: init_kernel_centers → kernel_centers in hierarchical
-                if strcmp(field, 'init_kernel_centers')
-                    data_hier.initialization.kernel_centers = data_flat.(field);
+                data_hier.slice.(field) = data_flat.(field);
+            end
+        end
+    end
+    
+    % Copy block fields (init + results); block-init flat names map to block hier names
+    if any(isfield(data_flat, block_fields))
+        data_hier.block = struct();
+        for i = 1:length(block_init_flat)
+            field = block_init_flat{i};
+            if isfield(data_flat, field)
+                if strcmp(field, 'proliferation_kernel_centers')
+                    data_hier.block.init_kernel_centers = data_flat.(field);
+                elseif strcmp(field, 'A1_all')
+                    data_hier.block.A_all_init = data_flat.(field);
+                elseif strcmp(field, 'A1_all_matrix')
+                    data_hier.block.A_all_init_matrix = data_flat.(field);
                 else
-                    data_hier.initialization.(field) = data_flat.(field);
+                    data_hier.block.(field) = data_flat.(field);
                 end
             end
         end
-    end
-    
-    % Copy mcsbd_slice fields (if they exist)
-    if any(isfield(data_flat, mcsbd_slice_fields))
-        data_hier.mcsbd_slice = struct();
-        for i = 1:length(mcsbd_slice_fields)
-            field = mcsbd_slice_fields{i};
+        for i = 1:length(block_result_flat)
+            field = block_result_flat{i};
             if isfield(data_flat, field)
-                data_hier.mcsbd_slice.(field) = data_flat.(field);
-            end
-        end
-    end
-    
-    % Copy mcsbd_block fields (if they exist)
-    if ~isempty(mcsbd_block_fields) && any(isfield(data_flat, mcsbd_block_fields))
-        data_hier.mcsbd_block = struct();
-        for i = 1:length(mcsbd_block_fields)
-            field = mcsbd_block_fields{i};
-            if isfield(data_flat, field)
-                data_hier.mcsbd_block.(field) = data_flat.(field);
+                data_hier.block.(field) = data_flat.(field);
             end
         end
     end
     
     % Copy any other fields that don't fit into categories
-    all_categorized_fields = [synGen_fields, initialization_fields, mcsbd_slice_fields, mcsbd_block_fields];
+    all_categorized_fields = [synGen_fields, slice_fields, block_fields];
     flat_fields = fieldnames(data_flat);
     for i = 1:length(flat_fields)
         field = flat_fields{i};
@@ -162,35 +160,67 @@ function data_flat = hierarchicalToFlat(data_hier)
         end
     end
     
-    % Extract from initialization
+    % Extract from slice (init + single-slice decomposition)
+    if isfield(data_hier, 'slice')
+        slice_fields = fieldnames(data_hier.slice);
+        for i = 1:length(slice_fields)
+            field = slice_fields{i};
+            data_flat.(field) = data_hier.slice.(field);
+        end
+    end
+    
+    % Backward compatibility: old files may have initialization / mcsbd_slice
     if isfield(data_hier, 'initialization')
-        initialization_fields = fieldnames(data_hier.initialization);
-        for i = 1:length(initialization_fields)
-            field = initialization_fields{i};
-            % Special mapping: kernel_centers → init_kernel_centers in flat (to avoid conflict with mcsbd_slice.kernel_centers)
-            if strcmp(field, 'kernel_centers')
-                data_flat.init_kernel_centers = data_hier.initialization.(field);
+        init_f = fieldnames(data_hier.initialization);
+        for i = 1:length(init_f)
+            f = init_f{i};
+            if strcmp(f, 'kernel_centers')
+                data_flat.init_kernel_centers = data_hier.initialization.(f);
             else
-                data_flat.(field) = data_hier.initialization.(field);
+                data_flat.(f) = data_hier.initialization.(f);
+            end
+        end
+    end
+    if isfield(data_hier, 'mcsbd_slice')
+        slice_f = fieldnames(data_hier.mcsbd_slice);
+        for i = 1:length(slice_f)
+            data_flat.(slice_f{i}) = data_hier.mcsbd_slice.(slice_f{i});
+        end
+    end
+    
+    % Extract from proliferation
+    if isfield(data_hier, 'proliferation')
+        prolif_f = fieldnames(data_hier.proliferation);
+        for i = 1:length(prolif_f)
+            field = prolif_f{i};
+            if strcmp(field, 'kernel_centers')
+                data_flat.proliferation_kernel_centers = data_hier.proliferation.(field);
+            else
+                data_flat.(field) = data_hier.proliferation.(field);
             end
         end
     end
     
-    % Extract from mcsbd_slice
-    if isfield(data_hier, 'mcsbd_slice')
-        mcsbd_slice_fields = fieldnames(data_hier.mcsbd_slice);
-        for i = 1:length(mcsbd_slice_fields)
-            field = mcsbd_slice_fields{i};
-            data_flat.(field) = data_hier.mcsbd_slice.(field);
+    % Extract from block (block-init names → flat names for downstream)
+    if isfield(data_hier, 'block')
+        block_f = fieldnames(data_hier.block);
+        for i = 1:length(block_f)
+            field = block_f{i};
+            if strcmp(field, 'A_all_init')
+                data_flat.A1_all = data_hier.block.(field);
+            elseif strcmp(field, 'A_all_init_matrix')
+                data_flat.A1_all_matrix = data_hier.block.(field);
+            elseif strcmp(field, 'init_kernel_centers')
+                data_flat.proliferation_kernel_centers = data_hier.block.(field);
+            else
+                data_flat.(field) = data_hier.block.(field);
+            end
         end
     end
-    
-    % Extract from mcsbd_block
     if isfield(data_hier, 'mcsbd_block')
-        mcsbd_block_fields = fieldnames(data_hier.mcsbd_block);
-        for i = 1:length(mcsbd_block_fields)
-            field = mcsbd_block_fields{i};
-            data_flat.(field) = data_hier.mcsbd_block.(field);
+        block_f = fieldnames(data_hier.mcsbd_block);
+        for i = 1:length(block_f)
+            data_flat.(block_f{i}) = data_hier.mcsbd_block.(block_f{i});
         end
     end
     
@@ -198,7 +228,7 @@ function data_flat = hierarchicalToFlat(data_hier)
     hier_fields = fieldnames(data_hier);
     for i = 1:length(hier_fields)
         field = hier_fields{i};
-        if ~ismember(field, {'synGen', 'initialization', 'mcsbd_slice', 'mcsbd_block'})
+        if ~ismember(field, {'synGen', 'slice', 'block', 'initialization', 'mcsbd_slice', 'mcsbd_block', 'proliferation'})
             data_flat.(field) = data_hier.(field);
         end
     end

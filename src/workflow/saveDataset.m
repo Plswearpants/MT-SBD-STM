@@ -32,7 +32,7 @@ function [meta] = saveDataset(log, data, params, meta, varargin)
 %   DESCRIPTION:
 %       This wrapper saves the pre-run phase results (synthetic data + kernel
 %       initialization) in nested structure. It:
-%       - Determines dataset name from params.initialization.init_method
+%       - Determines dataset name from params.slice.init_method (or params.init_method after extract)
 %       - Creates dataset folder: project_path/<dataset>/
 %       - Saves to: project_path/<dataset>/<dataset>.mat
 %       - Copies log file to dataset folder

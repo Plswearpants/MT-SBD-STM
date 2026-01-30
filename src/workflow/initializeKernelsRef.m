@@ -24,12 +24,12 @@ function [data, params] = initializeKernelsRef(log, data, params)
 %
 %   OUTPUTS:
 %       data                - Updated data struct (hierarchical):
-%                             data.initialization.A_init - {1×K} initialized kernels
-%                             data.initialization.kernel_centers - [K×2] positions (empty for manual)
+%                             data.slice.A_init - {1×K} initialized kernels
+%                             data.slice.init_kernel_centers - [K×2] positions (empty for manual)
 %       params              - Updated parameter struct (hierarchical):
-%                             params.initialization.init_method - 'manualXX' with iteration number
-%                             params.initialization.init_window - Window function {type, sigma}
-%                             Note: kernel_centers stored only in data.initialization, not in params
+%                             params.slice.init_method - 'manualXX' with iteration number
+%                             params.slice.init_window - Window function {type, sigma}
+%                             Note: init_kernel_centers stored in data.slice, not params
 %
 %   DESCRIPTION:
 %       This wrapper encapsulates the kernel initialization process for the
@@ -65,7 +65,7 @@ function [data, params] = initializeKernelsRef(log, data, params)
     end
     
     % Extract data from hierarchical structure (if needed)
-    if isfield(data, 'synGen') || isfield(data, 'mcsbd_slice')
+    if isfield(data, 'synGen') || isfield(data, 'slice') || isfield(data, 'mcsbd_slice')
         data = organizeData(data, 'extract');
     end
     
@@ -182,7 +182,7 @@ function [data, params] = initializeKernelsRef(log, data, params)
     % Store parameters according to documented structure (flat structure)
     params.init_method = sprintf('manual%02d', manual_iteration);
     params.init_window = window_type;
-    % Note: kernel_centers stored only in data.initialization, not in params
+    % Note: init_kernel_centers stored in data.slice, not in params
     
     % Store additional parameters (not in docs but needed internally)
     params.kernel_selection_type = kernel_selection_type;
@@ -197,6 +197,6 @@ function [data, params] = initializeKernelsRef(log, data, params)
     data = organizeData(data, 'write');
     params = organizeParams(params, 'write');
     
-    fprintf('  Manual kernel initialization stored as: %s\n', params.initialization.init_method);
+    fprintf('  Manual kernel initialization stored as: %s\n', params.slice.init_method);
 end
 

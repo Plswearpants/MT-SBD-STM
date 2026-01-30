@@ -24,24 +24,22 @@ function params_out = organizeParams(params_in, mode)
 %       │  ├─ kernel_sizes, LDoS_path, normalization_type
 %       │  └─ vis_generation, selected_indices, cutoff_M
 %       │
-%       ├─ initialization      % Kernel initialization parameters
-%       │  ├─ init_method      % 'auto' or 'manualXX'
-%       │  ├─ init_window      % Window function {type, sigma}
-%       │  ├─ kernel_sizes     % Initialization kernel sizes
-%       │  ├─ kernel_selection_type % 'selected' or 'random' (manual only)
-%       │  └─ kernel_sizes_ref % Reference slice kernel sizes (manual only)
-%       │  Note: kernel_centers stored in data.initialization, not params
-%       │
-%       ├─ mcsbd_slice         % Single-slice algorithm parameters
+%       ├─ slice               % Single-slice: init + decomposition (flattened)
+%       │  ├─ init_method, init_window, kernel_sizes_ref, kernel_selection_type
 %       │  ├─ initial_iteration, maxIT, lambda1
 %       │  ├─ phase2_enable, lambda2, nrefine, kplus_factor
-%       │  ├─ signflip_threshold, xpos, getbias
-%       │  └─ Xsolve_method
+%       │  ├─ signflip_threshold, xpos, getbias, Xsolve_method
+%       │  └─ use_xinit, show_progress
+%       │  Note: init_kernel_centers stored in data.slice, not params
 %       │
-%       └─ mcsbd_block         % Block/all-slice algorithm parameters
+%       └─ block               % Block init (IB01A) + all-slice algo (DA01A)
+%          Block-init params (IB01A): method, A1_matrix_unify_size, window_type, ...
+%          DA01A params: maxIT_allslice, use_reference_init, show_allslice_progress
+%          ├─ block_init_method  % 'proliferation' | 'block_manual' (unified IB01A)
+%          ├─ A1_matrix_unify_size % 'max_per_kernel' (default) | 'ref_slice'
+%          ├─ window_type_proliferation, interactive_size_adjust, use_matrix_format
 %          ├─ maxIT_allslice, lambda_allslice
-%          ├─ use_reference_init
-%          └─ show_allslice_progress
+%          ├─ use_reference_init, show_allslice_progress
 %
 %   FLAT STRUCTURE (internal use):
 %       params.SNR, params.N_obs, params.num_kernels, ...
@@ -80,15 +78,17 @@ function params_hier = flatToHierarchical(params_flat)
                      'LDoS_path', 'normalization_type', 'vis_generation', ...
                      'selected_indices', 'cutoff_M'};
     
-    initialization_fields = {'init_method', 'init_window', ...
-                            'kernel_sizes', 'kernel_selection_type', 'kernel_sizes_ref'};
+    % slice = initialization (ref-slice init) + mcsbd_slice (single-slice algo), flattened
+    slice_fields = {'init_method', 'init_window', 'kernel_sizes', 'kernel_selection_type', 'kernel_sizes_ref', ...
+                   'initial_iteration', 'maxIT', 'lambda1', 'phase2_enable', 'lambda2', 'nrefine', 'kplus_factor', ...
+                   'signflip_threshold', 'xpos', 'getbias', 'Xsolve_method', 'use_xinit', 'show_progress'};
     
-    mcsbd_slice_fields = {'initial_iteration', 'maxIT', 'lambda1', ...
-                          'phase2_enable', 'lambda2', 'nrefine', 'kplus_factor', ...
-                          'signflip_threshold', 'xpos', 'getbias', 'Xsolve_method'};
-    
-    mcsbd_block_fields = {'maxIT_allslice', 'lambda_allslice', ...
-                          'use_reference_init', 'show_allslice_progress'};
+    block_fields = {'block_init_method', 'A1_matrix_unify_size', ...
+                    'window_type_proliferation', 'interactive_size_adjust', 'use_matrix_format', ...
+                    'initial_iteration', 'maxIT_allslice', 'lambda1', 'phase2_enable', 'lambda2', ...
+                    'nrefine', 'kplus_factor', 'signflip_threshold', 'xpos', 'getbias', ...
+                    'Xsolve_method', 'use_xinit', ...
+                    'use_reference_init', 'show_allslice_progress'};
     
     % Copy synGen fields
     if any(isfield(params_flat, synGen_fields))
@@ -101,41 +101,30 @@ function params_hier = flatToHierarchical(params_flat)
         end
     end
     
-    % Copy initialization fields (if they exist)
-    if any(isfield(params_flat, initialization_fields))
-        params_hier.initialization = struct();
-        for i = 1:length(initialization_fields)
-            field = initialization_fields{i};
+    % Copy slice fields (init + single-slice algo), flattened
+    if any(isfield(params_flat, slice_fields))
+        params_hier.slice = struct();
+        for i = 1:length(slice_fields)
+            field = slice_fields{i};
             if isfield(params_flat, field)
-                params_hier.initialization.(field) = params_flat.(field);
+                params_hier.slice.(field) = params_flat.(field);
             end
         end
     end
     
-    % Copy mcsbd_slice fields (if they exist)
-    if any(isfield(params_flat, mcsbd_slice_fields))
-        params_hier.mcsbd_slice = struct();
-        for i = 1:length(mcsbd_slice_fields)
-            field = mcsbd_slice_fields{i};
+    % Copy block fields (if they exist)
+    if any(isfield(params_flat, block_fields))
+        params_hier.block = struct();
+        for i = 1:length(block_fields)
+            field = block_fields{i};
             if isfield(params_flat, field)
-                params_hier.mcsbd_slice.(field) = params_flat.(field);
-            end
-        end
-    end
-    
-    % Copy mcsbd_block fields (if they exist)
-    if any(isfield(params_flat, mcsbd_block_fields))
-        params_hier.mcsbd_block = struct();
-        for i = 1:length(mcsbd_block_fields)
-            field = mcsbd_block_fields{i};
-            if isfield(params_flat, field)
-                params_hier.mcsbd_block.(field) = params_flat.(field);
+                params_hier.block.(field) = params_flat.(field);
             end
         end
     end
     
     % Copy any other fields that don't fit into categories
-    all_categorized_fields = [synGen_fields, initialization_fields, mcsbd_slice_fields, mcsbd_block_fields];
+    all_categorized_fields = [synGen_fields, slice_fields, block_fields];
     flat_fields = fieldnames(params_flat);
     for i = 1:length(flat_fields)
         field = flat_fields{i};
@@ -159,30 +148,41 @@ function params_flat = hierarchicalToFlat(params_hier)
         end
     end
     
-    % Extract from initialization
+    % Extract from slice (init + single-slice algo)
+    if isfield(params_hier, 'slice')
+        slice_fields = fieldnames(params_hier.slice);
+        for i = 1:length(slice_fields)
+            field = slice_fields{i};
+            params_flat.(field) = params_hier.slice.(field);
+        end
+    end
+    
+    % Backward compatibility: old files may have initialization / mcsbd_slice
     if isfield(params_hier, 'initialization')
-        initialization_fields = fieldnames(params_hier.initialization);
-        for i = 1:length(initialization_fields)
-            field = initialization_fields{i};
-            params_flat.(field) = params_hier.initialization.(field);
+        init_f = fieldnames(params_hier.initialization);
+        for i = 1:length(init_f)
+            params_flat.(init_f{i}) = params_hier.initialization.(init_f{i});
         end
     end
-    
-    % Extract from mcsbd_slice
     if isfield(params_hier, 'mcsbd_slice')
-        mcsbd_slice_fields = fieldnames(params_hier.mcsbd_slice);
-        for i = 1:length(mcsbd_slice_fields)
-            field = mcsbd_slice_fields{i};
-            params_flat.(field) = params_hier.mcsbd_slice.(field);
+        slice_f = fieldnames(params_hier.mcsbd_slice);
+        for i = 1:length(slice_f)
+            params_flat.(slice_f{i}) = params_hier.mcsbd_slice.(slice_f{i});
         end
     end
     
-    % Extract from mcsbd_block
+    % Extract from block
+    if isfield(params_hier, 'block')
+        block_fields = fieldnames(params_hier.block);
+        for i = 1:length(block_fields)
+            field = block_fields{i};
+            params_flat.(field) = params_hier.block.(field);
+        end
+    end
     if isfield(params_hier, 'mcsbd_block')
-        mcsbd_block_fields = fieldnames(params_hier.mcsbd_block);
-        for i = 1:length(mcsbd_block_fields)
-            field = mcsbd_block_fields{i};
-            params_flat.(field) = params_hier.mcsbd_block.(field);
+        block_f = fieldnames(params_hier.mcsbd_block);
+        for i = 1:length(block_f)
+            params_flat.(block_f{i}) = params_hier.mcsbd_block.(block_f{i});
         end
     end
     
@@ -190,7 +190,7 @@ function params_flat = hierarchicalToFlat(params_hier)
     hier_fields = fieldnames(params_hier);
     for i = 1:length(hier_fields)
         field = hier_fields{i};
-        if ~ismember(field, {'synGen', 'initialization', 'mcsbd_slice', 'mcsbd_block'})
+        if ~ismember(field, {'synGen', 'slice', 'block', 'initialization', 'mcsbd_slice', 'mcsbd_block'})
             params_flat.(field) = params_hier.(field);
         end
     end

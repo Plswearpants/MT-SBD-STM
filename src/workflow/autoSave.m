@@ -24,7 +24,7 @@ function [meta] = autoSave(log, data, params, meta, varargin)
 %
 %   PHASE DETECTION LOGIC:
 %       Pre-run (dataset):  data.synGen exists, no mcsbd_* fields
-%       Post-run (run):     data.mcsbd_slice or data.mcsbd_block exists
+%       Post-run (run):     data.slice or data.block exists (or legacy mcsbd_slice/mcsbd_block)
 %
 %   EXAMPLES:
 %       % Auto-detect and save (after data generation)
@@ -116,7 +116,7 @@ function phase = detectPhase(data)
     
     % Check for pre-run phase
     has_synGen = isfield(data, 'synGen');
-    has_initialization = isfield(data, 'initialization') && isfield(data.initialization, 'A_init');
+    has_initialization = (isfield(data, 'slice') && isfield(data.slice, 'A_init')) || (isfield(data, 'initialization') && isfield(data.initialization, 'A_init'));
     
     % Determine phase
     if has_mcsbd_slice || has_mcsbd_block

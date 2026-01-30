@@ -20,7 +20,7 @@
 %  PHASE 2: POST-RUN (Algorithm Execution)
 %    Block 3 (DS01A): Decompose reference slice (find optimal activation)
 %    Block 4 (IS01A): Find most isolated points for kernel proliferation
-%    Block 5 (IP01A): Initialize kernels for all slices (proliferation)
+%    Block 5 (IB01A): Initialize block (proliferation or block_manual)
 %    Block 6 (DA01A): Decompose all slices simultaneously
 %    → Auto-save run results (runXX/runXX.mat)
 %
@@ -133,8 +133,8 @@ meta = saveDataset(log, data, params, meta);
 % -------------------------------------------------------------------------
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
-params.initialization.kernel_selection_type = 'selected';     % 'selected' or 'random'
-params.initialization.window_type = {'gaussian', 2.5};        % Window function for kernels
+params.slice.kernel_selection_type = 'selected';     % 'selected' or 'random'
+params.slice.window_type = {'gaussian', 2.5};        % Window function for kernels
                                                         % Options: 'hann', 'hamming', 'blackman'
                                                         %          {'gaussian', alpha}
                                                         %          {'kaiser', beta}
@@ -202,27 +202,27 @@ end
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
 % Phase I settings
-params.mcsbd_slice.initial_iteration = 1;          % Manopt/FISTA inner iterations (start)
-params.mcsbd_slice.maxIT = 15;                     % Number of outer alternating iterations
-params.mcsbd_slice.lambda1 = 5e-2;                 % L1 regularization (Phase I) - scalar or vector
+params.slice.initial_iteration = 1;          % Manopt/FISTA inner iterations (start)
+params.slice.maxIT = 15;                     % Number of outer alternating iterations
+params.slice.lambda1 = 5e-2;                 % L1 regularization (Phase I) - scalar or vector
 
 % Phase II settings (refinement)
-params.mcsbd_slice.phase2_enable = false;          % Enable Phase II refinement
-params.mcsbd_slice.lambda2 = 1e-2;                 % L1 regularization (Phase II final) - scalar or vector
-params.mcsbd_slice.nrefine = 5;                    % Number of refinement steps
-params.mcsbd_slice.kplus_factor = 0.5;             % Sphere lifting padding factor
+params.slice.phase2_enable = false;          % Enable Phase II refinement
+params.slice.lambda2 = 1e-2;                 % L1 regularization (Phase II final) - scalar or vector
+params.slice.nrefine = 5;                    % Number of refinement steps
+params.slice.kplus_factor = 0.5;             % Sphere lifting padding factor
 
 % Algorithm parameters
-params.mcsbd_slice.signflip_threshold = 0.2;       % Sign flip detection threshold
-params.mcsbd_slice.xpos = true;                    % Enforce positive activations
-params.mcsbd_slice.getbias = true;                 % Extract constant bias term
-params.mcsbd_slice.Xsolve_method = 'FISTA';        % 'FISTA' or 'pdNCG'
+params.slice.signflip_threshold = 0.2;       % Sign flip detection threshold
+params.slice.xpos = true;                    % Enforce positive activations
+params.slice.getbias = true;                 % Extract constant bias term
+params.slice.Xsolve_method = 'FISTA';        % 'FISTA' or 'pdNCG'
 
 % Initialization options
-params.mcsbd_slice.use_xinit = [];                 % Initial X guess ([] for none)
+params.slice.use_xinit = [];                 % Initial X guess ([] for none)
 
 % Display options
-params.mcsbd_slice.show_progress = true;           % Show progress during optimization
+params.slice.show_progress = true;           % Show progress during optimization
 
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -272,70 +272,94 @@ clearvars show_distributions show_isolation_maps
 
 
 %% =========================================================================
-%% IP01A: Initialize-Proliferation-01-A; Initialize Kernels for All Slices
+%% IB01A: Initialize-Block-01-A; Unified Block Initialization
 %  =========================================================================
-%  Edited by Dong Chen, 2025-10-27
+%  Single block for initializing kernels across all slices. Method is one of:
+%  - 'proliferation': use most isolated points (IS01A) as centers on all slices.
+%  - 'block_manual': use ref-slice manual/random centers (from IK01A) propagated to all slices.
+%  Outputs go to data.block (A_all_init, A_all_init_matrix, init_kernel_centers).
 %
-%  Uses the most isolated points identified in the reference slice as
-%  centers to initialize kernels across all energy slices. This "proliferation"
-%  approach ensures consistent spatial positioning across the energy dimension.
-%
-%  Dependencies: initializeProliferation.m (wrapper), initialize_kernels_proliferation.m
+%  Dependencies: initializeBlock.m (dispatches to initializeProliferation or block_manual path)
 
 % -------------------------------------------------------------------------
-% PRESETS: User-configurable parameters
+% PRESETS: User-configurable parameters (stored in params.block)
 % -------------------------------------------------------------------------
-window_type_proliferation = {'gaussian', 2.5};  % Window function
-interactive_size_adjust = false;                % Allow interactive resizing
-use_matrix_format = true;                       % Output as matrix vs cell array
-% How to unify kernel sizes in A1_all_matrix when they differ per slice:
-%   'max_per_kernel' - pad each slice to max H,W over slices (default; matches DA01A)
-%   'ref_slice'      - use reference-slice dimensions; pad/crop others to match
-A1_matrix_unify_size = 'max_per_kernel';
+params.block.block_init_method = 'proliferation';  % 'proliferation' | 'block_manual'
+params.block.A1_matrix_unify_size = 'max_per_kernel';  % 'max_per_kernel' (default) | 'ref_slice'
+params.block.window_type_proliferation = {'gaussian', 2.5};
+params.block.interactive_size_adjust = false;
+params.block.use_matrix_format = true;
 
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% LOG: Block start (format window_type for log)
-LOGcomment = sprintf("Window: %s, Interactive: %d, Matrix: %d, Unify: %s", ...
-    formatWindowType(window_type_proliferation), interactive_size_adjust, use_matrix_format, A1_matrix_unify_size);
-LOGcomment = logUsedBlocks(log.path, log.file, "IP01A", LOGcomment, 0);
+% LOG: Block start
+LOGcomment = sprintf("Block init method: %s, Unify: %s", ...
+    params.block.block_init_method, params.block.A1_matrix_unify_size);
+LOGcomment = logUsedBlocks(log.path, log.file, "IB01A", LOGcomment, 0);
 
-% Initialize kernels for all slices (wrapper handles visualization and logging)
-[data, params] = initializeProliferation(log, data, params, ...
-    'window_type_proliferation', window_type_proliferation, ...
-    'interactive_size_adjust', interactive_size_adjust, ...
-    'use_matrix_format', use_matrix_format, ...
-    'A1_matrix_unify_size', A1_matrix_unify_size);
-
-% Clear preset variables
-clearvars window_type_proliferation interactive_size_adjust use_matrix_format A1_matrix_unify_size
+% Unified block initialization (proliferation or block_manual)
+[data, params] = initializeBlock(log, data, params, ...
+    'block_init_method', params.block.block_init_method, ...
+    'A1_matrix_unify_size', params.block.A1_matrix_unify_size, ...
+    'window_type_proliferation', params.block.window_type_proliferation, ...
+    'interactive_size_adjust', params.block.interactive_size_adjust, ...
+    'use_matrix_format', params.block.use_matrix_format);
 
 
 %% =========================================================================
 %% DA01A: Decompose-All-01-A; Decompose All Slices Simultaneously
 %  =========================================================================
-%  Runs MT-SBD on all energy slices using proliferated kernel initialization.
-%  Dependencies: decomposeAllSlices.m
+%  Runs MT-SBD on all energy slices using block initialization (IB01A).
+%  Algorithm params (maxIT, lambda1, etc.) inherited from DS01A slice params.
+%  Outputs: data.block.Aout_all, Xout_all, bout_all, extras_all.
+%
+%  Dependencies: decomposeAllSlices.m (wrapper), MTSBD_synthetic_all_slice.m
 
 % -------------------------------------------------------------------------
-% PRESETS: User-configurable parameters
+% PRESETS: User-configurable parameters (stored in params.block)
 % -------------------------------------------------------------------------
-use_reference_init = true;          % Initialize X with reference results
-show_allslice_progress = true;      % Show progress during optimization
-maxIT_allslice = 15;                % Max iterations for all-slice decomposition
+% Phase I settings
+params.block.initial_iteration = 1;          % Manopt/FISTA inner iterations (start)
+params.block.maxIT_allslice = 15;            % Max outer alternating iterations for all-slice
+params.block.lambda1 = 5e-2;                 % L1 regularization (Phase I) - scalar or vector
+
+% Phase II settings (refinement)
+params.block.phase2_enable = false;          % Enable Phase II refinement
+params.block.lambda2 = 1e-2;                 % L1 regularization (Phase II final) - scalar or vector
+params.block.nrefine = 5;                    % Number of refinement steps
+params.block.kplus_factor = 0.5;             % Sphere lifting padding factor
+
+% Algorithm parameters
+params.block.signflip_threshold = 0.2;       % Sign flip detection threshold
+params.block.xpos = true;                    % Enforce positive activations
+params.block.getbias = true;                 % Extract constant bias term
+params.block.Xsolve_method = 'FISTA';        % 'FISTA' or 'pdNCG'
+
+% Initialization options
+params.block.use_reference_init = true;      % Initialize X from reference slice (DS01A)
+params.block.use_xinit = [];                 % Initial X guess ([] for none)
+
+% Display options
+params.block.show_allslice_progress = true;   % Show progress during optimization
 
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% Decompose all slices (wrapper handles logging and structure conversion)
-fprintf('Decomposing all slices...\n');
+% Decompose all slices (full block preset passed; wrapper resolves name-value or params.block)
 [data, params] = decomposeAllSlices(log, data, params, ...
-    'use_reference_init', use_reference_init, ...
-    'maxIT_allslice', maxIT_allslice, ...
-    'show_allslice_progress', show_allslice_progress);
-fprintf('All-slice decomposition complete.\n\n');
-
-% Clear preset variables
-clearvars use_reference_init show_allslice_progress maxIT_allslice
+    'use_reference_init', params.block.use_reference_init, ...
+    'show_allslice_progress', params.block.show_allslice_progress, ...
+    'maxIT_allslice', params.block.maxIT_allslice, ...
+    'initial_iteration', params.block.initial_iteration, ...
+    'lambda1', params.block.lambda1, ...
+    'phase2_enable', params.block.phase2_enable, ...
+    'lambda2', params.block.lambda2, ...
+    'nrefine', params.block.nrefine, ...
+    'kplus_factor', params.block.kplus_factor, ...
+    'signflip_threshold', params.block.signflip_threshold, ...
+    'xpos', params.block.xpos, ...
+    'getbias', params.block.getbias, ...
+    'Xsolve_method', params.block.Xsolve_method, ...
+    'use_xinit', params.block.use_xinit);
 
 
 %% =========================================================================
@@ -400,14 +424,19 @@ end
 for s = slices_to_viz
     fprintf('  Visualizing slice %d/%d...\n', s, params.num_slices);
 
-    % Prepare slice-specific data
+    % Prepare slice-specific data (data.slice or legacy data.mcsbd_slice)
+    if isfield(data, 'slice')
+        data_slice = data.slice;
+    else
+        data_slice = data.mcsbd_slice;
+    end
     Y_slice = data.synGen.Y(:,:,s);
     A0_slice = cell(1, params.num_kernels);
     for k = 1:params.num_kernels
-        if iscell(data.mcsbd_slice.A0_used)
-            A0_slice{k} = data.mcsbd_slice.A0_used{k}(:,:,s);
+        if iscell(data_slice.A0_used)
+            A0_slice{k} = data_slice.A0_used{k}(:,:,s);
         else
-            A0_slice{k} = data.mcsbd_slice.A0_used{s,k};
+            A0_slice{k} = data_slice.A0_used{s,k};
         end
     end
     Aout_slice_cell = cell(1, params.num_kernels);
@@ -470,9 +499,8 @@ if save_workspace || save_results_only
 
     if save_results_only
         % Save only essential results
-        save(results_fullpath, 'Y', 'A0', 'X0', 'params', ...
-            'ref_results', 'allslice_results', 'isolation_analysis', ...
-            'num_kernels', 'num_slices', 'log.file', '-v7.3');
+        save(results_fullpath, 'data', 'params', 'log', 'meta', ...
+            'num_kernels', 'num_slices', '-v7.3');
         fprintf('Results saved to: %s\n', results_fullpath);
     else
         % Save complete workspace

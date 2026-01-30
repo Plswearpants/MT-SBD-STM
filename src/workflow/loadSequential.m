@@ -27,8 +27,8 @@ function [log, data, params, meta] = loadSequential(varargin)
 %
 %   DATA MERGING:
 %       - Dataset file contains: data.synGen
-%       - Run file contains: data.mcsbd_slice or data.mcsbd_block
-%       - Merged result: data.synGen + data.mcsbd_slice/block
+%       - Run file contains: data.slice or data.block (or legacy mcsbd_slice/mcsbd_block)
+%       - Merged result: data.synGen + data.slice/block
 %
 %   DESCRIPTION:
 %       This function provides intelligent loading for the hierarchical
@@ -201,7 +201,7 @@ function [log, data, params, meta] = loadSequential(varargin)
             else
                 % Merge dataset data into current data
                 % Dataset should have data.synGen
-                % Run file has data.mcsbd_slice or data.mcsbd_block
+                % Run file has data.slice or data.block (or legacy mcsbd_slice/mcsbd_block)
                 if isfield(dataset_loaded.data, 'synGen')
                     data.synGen = dataset_loaded.data.synGen;
                     fprintf('      Merged data.synGen from dataset\n');

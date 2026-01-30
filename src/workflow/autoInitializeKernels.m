@@ -24,12 +24,12 @@ function [data, params] = autoInitializeKernels(log, data, params, varargin)
 %
 %   OUTPUTS:
 %       data                - Updated data struct with new field:
-%                             data.initialization.A_init - {1×K} initialized kernels
-%                             data.initialization.kernel_centers - [K×2] positions  
+%                             data.slice.A_init - {1×K} initialized kernels
+%                             data.slice.init_kernel_centers - [K×2] positions  
 %       params              - Updated parameter struct with:
-%                             params.initialization.init_method - 'auto'
-%                             params.initialization.init_window - {type, sigma}
-%                             params.initialization.kernel_sizes - sizes for initialization
+%                             params.slice.init_method - 'auto'
+%                             params.slice.init_window - {type, sigma}
+%                             params.slice.kernel_sizes - sizes for initialization
 %
 %   DESCRIPTION:
 %       Automatically initializes kernels by finding most isolated activation
@@ -65,7 +65,7 @@ function [data, params] = autoInitializeKernels(log, data, params, varargin)
     parse(p, log, data, params, varargin{:});
     
     % Extract parameters from hierarchical structure (if needed)
-    if isfield(params, 'initialization')
+    if isfield(params, 'synGen') || isfield(params, 'initialization') || isfield(params, 'slice')
         params = organizeParams(params, 'extract');
     end
     

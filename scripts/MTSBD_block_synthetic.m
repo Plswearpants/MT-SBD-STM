@@ -132,7 +132,7 @@ end
 fprintf('Calculating isolation scores and finding most isolated points...\n');
 
 % Choose target kernel sizes first
-type = 'kernel_sizes_all';
+type = 'ref_kernel_sizes';
 if strcmp(type, 'ref_kernel_sizes')
     target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
 elseif strcmp(type, 'kernel_sizes_cap')

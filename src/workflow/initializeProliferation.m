@@ -10,7 +10,7 @@ function [data, params] = initializeProliferation(log, data, params, varargin)
 %   INPUTS:
 %       log                 - Log struct with .path and .file fields
 %       data                - Data struct from previous blocks (must contain
-%                             data.mcsbd_slice.most_isolated_points from IS01A)
+%                             data.slice.most_isolated_points from IS01A; or data.most_isolated_points after extract)
 %       params              - Parameter struct from previous blocks (hierarchical or flat)
 %
 %       OPTIONAL (Name-Value pairs):
@@ -26,11 +26,11 @@ function [data, params] = initializeProliferation(log, data, params, varargin)
 %         'ref_slice'      - Use reference-slice dimensions; pad/crop other slices to match.
 %
 %   OUTPUTS:
-%       data                - Updated data struct with new fields in proliferation:
-%                             data.proliferation.A1_all - Cell {S×K} theoretical kernel per slice (sizes may differ)
-%                             data.proliferation.A1_all_matrix - Cell {K×1} [H×W×S] unified size (if use_matrix_format);
+%       data                - Updated data struct with new fields in block (organizeData maps to block):
+%                             data.block.A_all_init - Cell {S×K} theoretical kernel per slice (sizes may differ)
+%                             data.block.A_all_init_matrix - Cell {K×1} [H×W×S] unified size (if use_matrix_format);
 %                               H,W chosen by A1_matrix_unify_size (default: max per kernel, center-padded)
-%                             data.proliferation.kernel_centers - [K×2] centers used
+%                             data.block.init_kernel_centers - [K×2] centers used (proliferation)
 %       params              - Unchanged (no new params from this block)
 %
 %   REQUIRED (in data/params after extract):
@@ -70,7 +70,7 @@ function [data, params] = initializeProliferation(log, data, params, varargin)
     if isfield(params, 'synGen')
         params = organizeParams(params, 'extract');
     end
-    if isfield(data, 'synGen') || isfield(data, 'mcsbd_slice')
+    if isfield(data, 'synGen') || isfield(data, 'slice') || isfield(data, 'mcsbd_slice')
         data = organizeData(data, 'extract');
     end
 
@@ -155,7 +155,7 @@ function [data, params] = initializeProliferation(log, data, params, varargin)
                     Hunif = max(arrayfun(@(s) size(A1_all{s,k}, 1), 1:num_slices));
                     Wunif = max(arrayfun(@(s) size(A1_all{s,k}, 2), 1:num_slices));
             end
-            A1_all_matrix{k} = zeros(Hunif, Wunif, num_slices);
+            A1_all_matrix{k} = zeros(Hunif, Wunif, num_slices);  % zero-filled; only kernel region written below
             for s = 1:num_slices
                 Ks = A1_all{s,k};
                 [h, w] = size(Ks);
