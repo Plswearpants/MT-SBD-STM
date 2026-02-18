@@ -77,6 +77,7 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_sizes, kerneltype, windo
 
                 % Project onto the oblique manifold
                 A1{n} = proj2oblique(selected_kernel);
+                %A1{n} = (selected_kernel);
                 
                 % Apply window if specified
                 if ~isempty(window_type)

@@ -56,19 +56,19 @@ data_carried = data_selected;
 
 %% 2.4: MANUAL Local streak removal and interpolation 
 preprocessing_params.manualStreakRemoval_slices = 1:size(data_carried,3);
-factor = 2;
+factor = 1;
 preprocessing_params.manualStreakRemoval_factor = factor;
 Y_local_removed = zeros(size(data_carried));
 
 for s = preprocessing_params.manualStreakRemoval_slices
-    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'valley');
+    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'plateau');
     figure; plot(low_list, var_list);
     [min_var,min_idx]=min(var_list);
     min_low = low_list(min_idx);
 
-    [Y_local_removed(:,:,s), ~] = removeLocalStreaks(data_carried, s, factor*min_low, 3,'valley');
+    [Y_local_removed(:,:,s), ~] = removeLocalStreaks(data_carried, s, factor*min_low, 3,'plateau');
 
-    %[Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(Y_local_removed(:,:,s), 1, 0.8* min_low);
+    [Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(Y_local_removed(:,:,s), 1, 0.8* min_low);
 end
 for s = 1:size(data_carried,3)
     if ~ismember(s, preprocessing_params.manualStreakRemoval_slices)
@@ -82,7 +82,7 @@ data_carried = Y_local_removed;
 % This block runs streak correction, local streak removal, and interpolation in batch mode.
 
 % define the slices to run 
-preprocessing_params.autoStreakRemoval_slices = 1:25;
+preprocessing_params.autoStreakRemoval_slices = 50:100;
 factor1 = 1;
 factor2 = 1;
 preprocessing_params.autoStreakRemoval_factor1 = factor1;
@@ -90,15 +90,15 @@ preprocessing_params.autoStreakRemoval_factor2 = factor2;
 data_local_removed_auto = zeros(size(data_carried));
 for s = preprocessing_params.autoStreakRemoval_slices
     % 1. Find optimal threshold automatically (e.g., by minimizing variance)
-    [~, var_list, low_list] = streak_correction(data_carried(:,:,s), 3, 'plateau');
+    [~, var_list, low_list] = streak_correction(data_carried(:,:,s), 3, 'valley');
     [~, min_idx] = min(var_list);
     min_low = low_list(min_idx);
 
     % 2. Remove local streaks automatically (no UI)
-    [data_local_removed_auto(:,:,s), ~] = removeLocalStreaks(data_carried, s, factor1*min_low, 3, 'plateau', true);
+    [data_local_removed_auto(:,:,s), ~] = removeLocalStreaks(data_carried, s, factor1*min_low, 3, 'valley', true);
 
     % 3. Interpolate local streaks automatically (no UI)
-    %[data_local_removed_auto(:,:,s), ~] = interpolateLocalStreaks(data_local_removed_auto(:,:,s), 1, factor2*min_low, [], true);
+    [data_local_removed_auto(:,:,s), ~] = interpolateLocalStreaks(data_local_removed_auto(:,:,s), 1, factor2*min_low, [], true);
     
     % print finished status
     fprintf('Finished slice %d\n', s);
@@ -175,7 +175,7 @@ data_carried = data_plane;
 [Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
 %% 3. ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('LiFeAs_processed0721_FULL.mat', 'data_original', 'Y', 'data_cropped','data_masked',"energy_range", 'preprocessing_params')
+save('ZrSiTe_preprocessed0207_slice_1to80.mat', 'data_original', 'Y', 'data_cropped','data_masked',"energy_range", 'preprocessing_params')
 
 
 %% Before Run Standardize
@@ -212,7 +212,7 @@ axis square;
 % draw square on the data to include as many visible ripples of the scattering as possible 
 same_size = 1;
 kerneltype = 'selected';
-window_type = {'gaussian', 2};
+window_type = {'gaussian', 5};
 %window_type = '';
 
 if same_size
@@ -233,7 +233,7 @@ else
         kernel_sizes(k,:) = size(A1_ref{k});
     end
 end
-
+%%
 figure;
 for k = 1:num_kernels
     subplot(1,num_kernels,k);
@@ -258,10 +258,10 @@ for n = 1:num_kernels
 end
 
 % SBD settings.
-miniloop_iteration = 2;
-outerloop_maxIT= 2;
+miniloop_iteration = 1;
+outerloop_maxIT= 8;
 %params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.02, 0.03, 0.05, 0.05];  % regularization parameter for Phase I
+params_ref.lambda1 = [0.022, 0.020, 0.018, 0.02, 0.02];  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params_ref.phase2 = false;
 params_ref.kplus = ceil(0.2 * kernel_sizes);
@@ -275,7 +275,13 @@ params_ref.Xsolve = 'FISTA';
 % noise variance for computeResidualQuality.m
 params_ref.noise_var = eta_data;
 
-% Run and save 
+% Update params for MTSBD
+for k = 1:num_kernels
+    params_ref.xinit{k}.X = X_ref(:,:,k);
+    params_ref.xinit{k}.b = 0;
+end
+
+% Run and save
 % 2. The fun part
 [A_ref, X_ref, b_ref, extras_ref] = MT_SBD(Y_ref, kernel_sizes, params_ref, dispfun, A1_ref, miniloop_iteration, outerloop_maxIT);
 
@@ -557,6 +563,7 @@ elseif choice == 2
     % Display the reference image for manual selection
     figure('Name', 'Manual Kernel Center Selection');
     imagesc(Y_ref);
+    axis square;
     title('Click on 3 points to select kernel centers. Press Enter when done.');
     colormap(gray);
     colorbar;
@@ -633,7 +640,7 @@ eta_data3d = estimate_noise3D(Y, 'std');
 
 %% initialize xinit for all slices with reference slice
 for k = 1:num_kernels
-    params.xinit{k}.X = X_ref_pad(:,:,k);
+    params.xinit{k}.X = X_ref(:,:,k);
     b_temp = extras_ref.phase1.biter(k); 
     params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
 end
@@ -641,9 +648,9 @@ end
 %% Run for all_slice
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 6;
+outerloop_maxIT= 3;
 
-params.lambda1 = [0.225, 0.27, 0.27, 0.27];  % regularization parameter for Phase I
+params.lambda1 = [0.179, 0.175, 0.171, 0.141, 0.141];  % regularization parameter for Phase I
 %params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
 params.phase2 = false;
 params.kplus = ceil(0.5 * kernel_sizes);
@@ -670,7 +677,7 @@ end
 % Update params for MTSBD
 for k = 1:num_kernels
     params.xinit{k}.X = X_ref(:,:,k);
-    b_temp = extras_ref.phase1.biter(k); 
+    b_temp = 0; 
     params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
 end
 
@@ -682,16 +689,25 @@ else
         Y_used, kernel_sizes, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
 end
 
-eta3dall = permute(repmat(eta_data3d,[6,1]),[2,1]);
+eta3dall = permute(repmat(eta_data3d,[outerloop_maxIT,1]),[2,1]);
 observation_fidelity = eta3dall./squeeze(var(ALL_extras.phase1.residuals, 0, [1,2]));
-save('ZrSiTe_pos_meV_[100,100]_good.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras','params', 'eta_data3d','observation_fidelity');
+save('ZrSiTe0207_meV_[80,80]_slice_1to80_new.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras','params', 'eta_data3d','observation_fidelity');
 
+% plot the observation fidelity  x axis is the number of slices, y is
+% observation fidelity
+figure; 
+hold on 
+for i = 1:outerloop_maxIT
+    plot(1:num_slices,observation_fidelity(:,i));
+    legend();
+end
+hold off
 %% convert Aout_ALL to cell format
-%[num_slices, num_kernels] = size(bout_ALL);
+[num_slices, num_kernels] = size(bout_ALL);
 Aout_ALL_cell = cell(num_slices, num_kernels);
 for s = 1:num_slices
     for k = 1:num_kernels
-        Aout_ALL_cell{s,k} = Aout_Full_energy{k}(:,:,s);
+        Aout_ALL_cell{s,k} = Aout_ALL{k}(:,:,s);
     end
 end
 
@@ -730,6 +746,16 @@ end
 figure;
 d3gridDisplay(Y_rec, 'dynamic')
 
+%% Create reconstruction for initialized all slices
+Y_init = zeros(size(Y_used));
+for i = 1:size(Y_used,3)
+    for k = 1:num_kernels
+        Y_init(:,:,i) = Y_init(:,:,i) + convfft2(A1_all{i,k}, X_ref(:,:,k));
+    end
+end
+figure;
+d3gridDisplay(Y_init, 'dynamic')
+
 %% Create reconstruction for each kernel type
 Y_rec_each = zeros([num_kernels,size(Y_used)]);
 for i = 1:size(Y_used,3)
@@ -738,6 +764,7 @@ for i = 1:size(Y_used,3)
         Y_rec_each(k,:,:,i) = convfft2(Aout_ALL_cell{i,k}, Xout_ALL(:,:,k));
     end
 end
+
 % create fft of Y_rec_each
 FT_QPI_Y_rec_each = zeros([num_kernels,size(Y_used)]);
 for k = 1:num_kernels
@@ -767,6 +794,27 @@ figure;
 d3gridDisplay(Y_rec_ALL_show_norm, 'dynamic');
 title('Normalized Y_{rec}_-{each} and FT-QPI combined');
 
+%% Y, Y_rec and Y residual
+
+% Y and Y residual
+Y_resi = ALL_extras.phase1.residuals(:,:,:,end);
+Y_full_visualize = [Y_used, Y_rec, Y_resi];
+qpi_Y_full_visualize = [qpiCalculate(Y_used), qpiCalculate(Y_rec), qpiCalculate(Y_resi)];
+
+% Normalize each slice across all kernels
+for i = 1:size(Y_full_visualize,3)
+    Y_full_visualize(:,:,i) = mat2gray(Y_full_visualize(:,:,i));
+    qpi_Y_full_visualize(:,:,i) = 1-mat2gray(qpi_Y_full_visualize(:,:,i),[0,1]);
+end
+
+% Combine normalized reconstructions and their FT-QPI
+Y_show_norm = [Y_full_visualize; qpi_Y_full_visualize];
+
+%% Display the Y_show_norm
+figure;
+d3gridDisplay(Y_show_norm, 'dynamic');
+title('ALL combined');
+
 %% 
 Aout_show = [];
 for i = 1: size(Aout_ALL,1)
@@ -789,6 +837,7 @@ d3gridDisplay(qpi_show, 'dynamic')
 Aout_Full_energy = cell(2,1);
 Aout_Full_energy{1,1}=C;
 Aout_Full_energy{2,1}=D;
+
 %%
 save('ZrSiTe_kernel1&2_FULL_[80,80].mat', 'Y_used','Aout_Full_energy', 'Xout_A1', 'Xout_A2');
 
@@ -821,7 +870,7 @@ figure;
 d3gridDisplay(ALL_show_norm, 'dynamic');
 
 %% write the video 
-gridVideoWriter(rot90(ALL_show_norm), V, 'dynamic', 100, 'gray', 0, [800 800]);
+gridVideoWriter(rot90(Y_show_norm), V, 'dynamic', 100, 'invgray', 0, [800 800]);
 
 % delay unit? 
 %% QPI movies 

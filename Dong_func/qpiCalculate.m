@@ -1,4 +1,4 @@
-function [QPI, comment] = qpiCalculate(data)
+function [QPI, comment] = qpiCalculate(data, m)
 %This function calculates the Quasiparticle Interference (QPI) patterns using
 %Fourier transform of input data (typically dI/dV or Lockin dI/dV)
 %
@@ -11,22 +11,24 @@ function [QPI, comment] = qpiCalculate(data)
 %   QPI         this is a 3d array form (x, y, V) in the fourier domain 
 
 arguments
-    data        % this is a 3d array form (x, y, V)
+    data
+    m = []
 end
 
-comment = sprintf("qpiCalculate(data:%s x %s x %s)|", ...
-    mat2str(size(data,1)), mat2str(size(data,2)), mat2str(size(data,3)));
-
-% Get dimensions from input data
 [x_num, y_num, points] = size(data);
 
-% Initialize output array
-QPI = zeros(x_num, y_num, points);
+comment = sprintf("qpiCalculate(data:%s x %s x %s)|", ...
+    mat2str(x_num), mat2str(y_num), mat2str(points));
 
-% Helper function to calculate QPI for a single slice
-calculateQPI = @(slice) abs(fftshift(fft2(slice - mean(mean(slice)))));
+if isempty(m)
+    QPI = zeros(x_num, y_num, points);
+    calculateQPI = @(slice) abs(fftshift(fft2(slice - mean(mean(slice)))));
+else
+    validateattributes(m, {'numeric'}, {'scalar','integer','positive','finite','real'});
+    QPI = zeros(m, m, points);
+    calculateQPI = @(slice) abs(fftshift(fft2(slice - mean(mean(slice)), m, m)));
+end
 
-% Calculate QPI
 for i = 1:points
     QPI(:,:,i) = calculateQPI(data(:,:,i));
 end

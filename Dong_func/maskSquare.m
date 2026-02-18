@@ -73,4 +73,5 @@ end
 mask = false(size(Y,1), size(Y,2));
 mask(y:y+height-1, x:x+width-1) = true;
 
+close;
 end 
