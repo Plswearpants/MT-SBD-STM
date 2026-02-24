@@ -4,10 +4,11 @@ function [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu, varargin )
 %       [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu )
 %
 %   - Optional variables:
-%       [ ... ] = Xsolve_FISTA( ... , Xinit, Xpos, getbias )
+%       [ ... ] = Xsolve_FISTA( ... , Xinit, Xpos, getbias, slice_weights )
 %       Xinit:      initial value for X
 %       Xpos:       constrain X to be a positive solution
 %       getbias:    extract constant bias as well as X
+%       slice_weights: per-slice weights for multilayer solve (default ones)
 %
 
     % Initialize variables and function handles:
@@ -25,7 +26,7 @@ function [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu, varargin )
   
     %% Checking arguments:
     nvararg = numel(varargin);
-    if nvararg > 3
+    if nvararg > 4
         error('Too many input arguments.');
     end
 
@@ -45,6 +46,14 @@ function [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu, varargin )
         getbias = varargin{idx};
     end
 
+    idx = 4; slice_weights = ones(n,1);
+    if nvararg >= idx && ~isempty(varargin{idx})
+        slice_weights = varargin{idx}(:);
+    end
+    if numel(slice_weights) ~= n
+        error('slice_weights must have one weight per slice in Y.');
+    end
+
     
     
     %% Iterate:    
@@ -56,10 +65,11 @@ function [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu, varargin )
         % Gradients and Hessians:
         grad_fW = zeros(m); grad_fu = zeros(n,1); R_A = zeros(m);
         for i = 1:n     % sum up
+            wi = slice_weights(i);
             Ri = convfft2(A(:,:,i), W) + u(i) - Y(:,:,i);
-            grad_fW = grad_fW + convfft2( A(:,:,i), Ri, 1 );
-            grad_fu(i) = sum(Ri(:));
-            R_A = R_A + abs(fft2(A(:,:,i),m(1),m(2))).^2;
+            grad_fW = grad_fW + wi * convfft2( A(:,:,i), Ri, 1 );
+            grad_fu(i) = wi * sum(Ri(:));
+            R_A = R_A + wi * abs(fft2(A(:,:,i),m(1),m(2))).^2;
         end
 
         % FISTA update
@@ -79,7 +89,7 @@ function [ Xsol, info ] = Xsolve_FISTA( Y, A, lambda, mu, varargin )
         %TODO Check conditions to repeat iteration:
         f = 0;
         for i = 1:n
-            f = f + norm(convfft2(A(:,:,i), reshape(X, m)) + b(i) - Y(:,:,i), 'fro')^2/2;
+            f = f + slice_weights(i) * norm(convfft2(A(:,:,i), reshape(X, m)) + b(i) - Y(:,:,i), 'fro')^2/2;
         end
         costs(it,1) = f;
         costs(it,2) = g.cost(X, lambda);

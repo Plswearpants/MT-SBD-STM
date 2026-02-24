@@ -34,7 +34,16 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
         dispfun = @(Y,A,X,k,kplus,idx) 0;
     end
     
-    lambda1 = params.lambda1;
+    if isfield(params, 'lambda1_weighted') && ~isempty(params.lambda1_weighted)
+        lambda1_weighted = params.lambda1_weighted;
+    else
+        lambda1_weighted = params.lambda1;
+    end
+    if isfield(params, 'lambda1_unweighted') && ~isempty(params.lambda1_unweighted)
+        lambda1_unweighted = params.lambda1_unweighted;
+    else
+        lambda1_unweighted = params.lambda1;
+    end
     if params.phase2
         kplus = params.kplus;
         lambda2 = params.lambda2;
@@ -74,6 +83,49 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
     spatial = size(Y,1);
     kernel_num = size(k,1);
     mu = 10^-6;
+
+    if ~isfield(params, 'kernel_update_order') || isempty(params.kernel_update_order)
+        kernel_update_order = 1:kernel_num;
+    else
+        kernel_update_order = params.kernel_update_order(:).';
+        if numel(kernel_update_order) ~= kernel_num
+            error('params.kernel_update_order must contain exactly one index per kernel.');
+        end
+        if any(kernel_update_order < 1) || any(kernel_update_order > kernel_num)
+            error('params.kernel_update_order indices must be in [1, kernel_num].');
+        end
+        if numel(unique(kernel_update_order)) ~= kernel_num
+            error('params.kernel_update_order must be a permutation without duplicates.');
+        end
+    end
+
+    if ~isfield(params, 'slice_weights') || isempty(params.slice_weights)
+        slice_weights = ones(slices, kernel_num);
+    else
+        sw = params.slice_weights;
+        if isvector(sw)
+            sw = sw(:);
+            if numel(sw) ~= slices
+                error('Vector params.slice_weights must have one value per slice.');
+            end
+            slice_weights = repmat(sw, [1, kernel_num]);
+        else
+            if ~isequal(size(sw), [slices, kernel_num])
+                error('Matrix params.slice_weights must be [num_slices x num_kernels].');
+            end
+            slice_weights = sw;
+        end
+
+        % Validate each kernel has at least one trusted slice.
+        for n = 1:kernel_num
+            if any(slice_weights(:,n) < 0)
+                error('slice_weights must be nonnegative.');
+            end
+            if sum(slice_weights(:,n)) <= 0
+                error('Each kernel weight column must contain at least one positive entry.');
+            end
+        end
+    end
     
     % Update the configuration file with the new max_iteration
     update_config('Xsolve_config.mat', 'MAXIT', Max_iteration, 'Xsolve_config_tunable.mat');
@@ -111,7 +163,8 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
         Y_residual = Y - Y_sum;
         
         % Update each kernel
-        for n = 1:kernel_num
+        for ord_idx = 1:kernel_num
+            n = kernel_update_order(ord_idx);
             X_current = Xiter(:,:,n);
             Yiter = Y_residual + (1-1/(faint_factor*iter+1))*convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3)))) + (1/(faint_factor*iter+1))*Y_sum;
             Y_residual_pre = Y_residual + convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3))));
@@ -120,13 +173,13 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
             % Initial X computation only on first iteration if no initial guess is provided
             if iter == 1
                 if isempty(xinit)
-                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit, xpos);
+                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1_weighted(n), mu, xinit, xpos, getbias, slice_weights(:,n));
                 else
-                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1(n), mu, xinit{n}, xpos);
+                    X_struct.(['x',num2str(n)]) = Xsolve_FISTA_tunable(Y, A{n}, lambda1_weighted(n), mu, xinit{n}, xpos, getbias, slice_weights(:,n));
                 end
             end
             
-            [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A{n}, lambda1(n), Xsolve, X_struct.(['x',num2str(n)]), xpos, getbias, dispfun1);
+            [A{n}, X_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A{n}, lambda1_unweighted(n), Xsolve, X_struct.(['x',num2str(n)]), xpos, getbias, dispfun1, slice_weights(:,n));
             
             Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
             biter(:,n) = X_struct.(['x',num2str(n)]).b;
@@ -160,8 +213,8 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
             X2_struct.(['x',num2str(n)]) = X_struct.(['x',num2str(n)]);
         end
     
-        lambda = lambda1;
-        lam2fac = (lambda2./lambda1).^(1/nrefine);
+        lambda = lambda1_unweighted;
+        lam2fac = (lambda2./lambda1_unweighted).^(1/nrefine);
         
         % Initialize Phase II metrics
         extras.phase2.activation_metrics = zeros(nrefine + 1, kernel_num);
@@ -176,13 +229,14 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
             end
             Y_residual = Y - Y_sum;
     
-            for n = 1:kernel_num
+            for ord_idx = 1:kernel_num
+                n = kernel_update_order(ord_idx);
                 fprintf('Processing kernel %d, lambda = %.1e: \n', n, lambda(n));
                 % Calculate Yiter without demixing
                 Yiter = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
                 
                 dispfun2 = @(A, X) dispfun{n}(Y, A, X, k3(n,:), kplus(n,:));
-                [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2);
+                [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2, slice_weights(:,n));
                 
                 % Attempt to 'unshift" the a and x
                 score = zeros(2*kplus(n,1)+1, 2*kplus(n,2)+1);

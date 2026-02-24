@@ -4,7 +4,7 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve,
     %       [ Aout, Xsol, Stats ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve)
     %
     %   - Optional variables:
-    %       [ ... ] = Asolve_Manopt_tunable( ... , Xinit, Xpos, getbias, dispfun )
+    %       [ ... ] = Asolve_Manopt_tunable( ... , Xinit, Xpos, getbias, dispfun, slice_weights )
     %
 
     load([fileparts(mfilename('fullpath')) '/../examples/Asolve_config_tunable.mat']); %#ok<*LOAD>
@@ -20,7 +20,7 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve,
     
         %% Handle the extra variables:
         nvarargin = numel(varargin);
-        if nvarargin > 4
+        if nvarargin > 5
             error('Too many input arguments.');
         end
     
@@ -37,11 +37,18 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve,
         else
             xpos = varargin{idx};
         end
+
+        idx = 5;
+        if nvarargin < idx || isempty(varargin{idx})
+            slice_weights = ones(size(Y,3),1);
+        else
+            slice_weights = varargin{idx}(:);
+        end
         
         idx = 1;
         if nvarargin < idx || isempty(varargin{idx})
             if strcmp(Xsolve,'FISTA')
-                xinit = Xsolve_FISTA(Y, Ain, lambda, mu, [], xpos);
+                xinit = Xsolve_FISTA(Y, Ain, lambda, mu, [], xpos, getbias);
             elseif strcmp(Xsolve,'pdNCG')
                 xinit = Xsolve_pdNCG(Y, Ain, lambda, mu, [], xpos);
             end
@@ -69,9 +76,9 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve,
         %}
     
         problem.M = spherefactory(prod(k)*n);
-        problem.cost = @(a, store) costfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve);
-        problem.egrad = @(a, store) egradfun(a, store,  Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve);
-        problem.ehess = @(a, u, store) ehessfun(a, u, store,  Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve);
+        problem.cost = @(a, store) costfun(a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights);
+        problem.egrad = @(a, store) egradfun(a, store,  Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights);
+        problem.ehess = @(a, u, store) ehessfun(a, u, store,  Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights);
     
         options.statsfun = @(problem, a, stats, store) statsfun( problem, a, stats, store, k, n, saveiterates, dispfun);
         %options.stopfun = @(problem, x, info, last) stopfun(problem, x, info, last, TRTOL);
@@ -100,17 +107,17 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve,
         end
     end
     
-    function [ cost, store ] = costfun( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve)
+    function [ cost, store ] = costfun( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights)
         if ~isfield(store, 'X')
-            store = computeX( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve);
+            store = computeX( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights);
         end
     
         cost = store.cost;
     end
     
-    function [ egrad, store ] = egradfun( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve)
+    function [ egrad, store ] = egradfun( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights)
         if ~isfield(store, 'X')
-            store = computeX( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve);
+            store = computeX( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights);
         end
         
         m = size(store.X);
@@ -121,22 +128,24 @@ function [ Aout, Xsol, extras ] = Asolve_Manopt_tunable( Y, Ain, lambda, Xsolve,
             idx = (i-1)*prod(k) + (1:prod(k));
             tmp = convfft2( store.X, convfft2( reshape(a(idx), k), store.X ) + store.b(i) - Y(:,:,i), 1, m+k-1, m);
             tmp = tmp(1:k(1), 1:k(2));
+            % Keep A-updates unweighted so all slices can update kernels.
             egrad(idx) = tmp(:);
         end
     end
     
-    function [ ehess, store ] = ehessfun( a, u, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve)
+    function [ ehess, store ] = ehessfun( a, u, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights)
         if ~isfield(store, 'X')
-            store = computeX( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve);
+            store = computeX( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights);
         end
     
         ehess = H_function( u, Y, reshape(a, [k n]), store.X, lambda, mu );
     end
     
-    function [ store ] = computeX( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve)
+    function [ store ] = computeX( a, store, Y, k, n, lambda, mu, xinit, xpos, getbias, Xsolve, slice_weights)
         % Updates the cache to store X*(A), and the active-set whenever a new
         % a new iteration by the trust-region method needs it.
         if strcmp(Xsolve,'FISTA')
+            % Keep Asolve's inner X-update unweighted.
             sol = Xsolve_FISTA( Y, reshape(a, [k n]), lambda, mu, xinit, xpos, getbias );
         elseif strcmp(Xsolve,'pdNCG')
             sol = Xsolve_pdNCG( Y, reshape(a, [k n]), lambda, mu, xinit, xpos, getbias);

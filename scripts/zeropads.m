@@ -43,3 +43,14 @@ end
 center = [1241,249];
 side = 120;
 nn = [combined_data(249-120:249+120,1241-120:1241+120,:);combined_data(745-120:745+120,1241-120:1241+120,:)];
+
+%%  
+
+pad_length = size(Y_used,1);
+kernel_num = size(Aout_ALL,1);
+slice_num = size(Y_used,3);
+qpi_Aout_pad = zeros(pad_length, kernel_num*pad_length, slice_num);
+
+for i = 1:kernel_num
+    qpi_Aout_pad(:,1+(i-1)*477:i*size(qpi_Aout_pad,1),:) = qpiCalculate(Aout_ALL{i},477);
+end
