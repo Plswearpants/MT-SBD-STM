@@ -1,7 +1,8 @@
-function [corrected_data, streak_mask, final_min_val] = removeLocalStreaks(Y, slice_idx, min_value, max_streak_width, mode, auto)
+function [corrected_data, streak_mask, final_min_val] = removeLocalStreaks(Y, slice_idx, min_value, max_streak_width, mode, auto, streak_mask_in)
 %REMOVELOCALSTREAKS Interactive or automatic streak removal tool using multi-scale Laplacian detection
 %   [corrected_data, streak_mask] = removeLocalStreaks(Y, slice_idx, min_value, max_streak_width, mode, auto)
 %   [corrected_data, streak_mask, final_min_val] = removeLocalStreaks(...)
+%   [corrected_data, streak_mask, final_min_val] = removeLocalStreaks(..., streak_mask_in)
 %   When auto==false (interactive), on Done final_min_val is the chosen threshold so the
 %   caller can compute effective factor as final_min_val/min_low for reuse or recording.
 %   If auto==true and min_value is provided, runs in non-interactive, non-visual mode.
@@ -39,6 +40,9 @@ end
 if nargin < 6
     auto = false;
 end
+if nargin < 7
+    streak_mask_in = [];
+end
 corrected_data = [];
 streak_mask = [];
 final_min_val = [];
@@ -47,10 +51,25 @@ final_min_val = [];
 data = Y(:,:,slice_idx);
 [rows, cols] = size(data);
 
+% If a precomputed mask is provided, use it directly (no UI, no thresholding)
+if ~isempty(streak_mask_in)
+    streak_mask = logical(streak_mask_in);
+    if ~isequal(size(streak_mask), size(data))
+        error('removeLocalStreaks: streak_mask_in must match slice size [%d x %d].', rows, cols);
+    end
+    if strcmpi(mode, 'valley') || strcmpi(mode, 'plateau')
+        corrected_data = streakCore('correct', data, streak_mask, 'background_mean');
+    else
+        corrected_data = streakCore('correct', data, streak_mask, 'neighbor_interp');
+    end
+    global_mean = mean(data(:)); %#ok<NASGU> for API consistency with callbacks
+    return;
+end
+
 % Laplacian and threshold range (shared with streak_correction via streakCore)
 [L_for_mask, slider_range] = streakCore('laplacian', data, mode, max_streak_width);
 % Population-ranked threshold list for UI slider (linear in rank, not value)
-lower_list_ui = streakCore('threshold_list', L_for_mask, 100);
+lower_list_ui = streakCore('threshold_list', L_for_mask, 400);
 
 if isempty(min_value)
     min_val = slider_range(1);
