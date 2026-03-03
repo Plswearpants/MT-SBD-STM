@@ -111,6 +111,12 @@ else
     streak_mask = (L_for_mask >= min_val);
 end
 
+% Remove isolated pixels: keep only pixels with at least one vertical neighbor
+neighbor_up = [false(1, cols); streak_mask(1:end-1, :)];
+neighbor_down = [streak_mask(2:end, :); false(1, cols)];
+has_vertical_neighbor = neighbor_up | neighbor_down;
+streak_mask = streak_mask & has_vertical_neighbor;
+
 % Compute correction
 corrected = data;
 [streak_rows, streak_cols] = find(streak_mask);
@@ -336,6 +342,12 @@ function updateContrast(src, ~, h_mask, min_edit, h_corrected, data, L_for_mask,
     else
         streak_mask = (L_for_mask >= min_val);
     end
+    % Remove isolated pixels: keep only pixels with at least one vertical neighbor
+    [rows, cols] = size(streak_mask);
+    neighbor_up = [false(1, cols); streak_mask(1:end-1, :)];
+    neighbor_down = [streak_mask(2:end, :); false(1, cols)];
+    has_vertical_neighbor = neighbor_up | neighbor_down;
+    streak_mask = streak_mask & has_vertical_neighbor;
     [streak_rows, streak_cols] = find(streak_mask);
     corrected = data;
     unique_cols = unique(streak_cols);

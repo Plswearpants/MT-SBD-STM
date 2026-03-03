@@ -82,6 +82,13 @@ for i = 1:length(lower_list)
     else
         streak_mask = (L_for_mask >= lower_list(i));
     end
+    
+    % Remove isolated pixels: keep only pixels with at least one vertical neighbor
+    neighbor_up = [false(1, cols); streak_mask(1:end-1, :)];
+    neighbor_down = [streak_mask(2:end, :); false(1, cols)];
+    has_vertical_neighbor = neighbor_up | neighbor_down;
+    streak_mask = streak_mask & has_vertical_neighbor;
+    
     [streak_rows, streak_cols] = find(streak_mask);
     
     % Correct streaks
