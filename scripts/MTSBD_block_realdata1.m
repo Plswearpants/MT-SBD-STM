@@ -1,4 +1,7 @@
-%% Block 1: Load the .3ds data
+%% Block 0: Centralized run configuration
+cfg = init_config();
+
+%% Block 1: Load the .3ds data 
 
 % INPUTS
 % 1: Data file to load, including file type ('QPI.3ds' for example)
@@ -13,7 +16,7 @@
 % QPI: Fourier transformed dIdV data
 
 % Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('QPImap012.3ds', 10);
+[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall(cfg.load.data_file, cfg.load.smoothing_sigma);
 xsize = header.grid_dim(1);
 ysize = header.grid_dim(2);
 elayer = header.points;
@@ -163,7 +166,7 @@ preprocessing_params.heal_direction = input('Enter direction to heal (horizontal
 
 data_streakremoved_healed = heal_streaks(data_carried, preprocessing_params.heal_direction);
 
-%% 2.6c: directional_plane (optional, zero slope at one direction)
+%% 2.6c: directional_plane (optional, zero slope at one direction) (retire)
 % Normalize background 
 [data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
@@ -185,6 +188,12 @@ figure;
 d3gridDisplay(Y,rangetype);
 params.ref_slice = input('Enter reference slice number: ');
 num_kernels = input('enter the number of kernels you wish to apply: ');
+if isempty(params.ref_slice) && ~isempty(cfg.reference.default_ref_slice)
+    params.ref_slice = cfg.reference.default_ref_slice;
+end
+if isempty(num_kernels) && ~isempty(cfg.reference.default_num_kernels)
+    num_kernels = cfg.reference.default_num_kernels;
+end
 close();
 
 % Validate the input
@@ -210,27 +219,35 @@ axis square;
 close();
 %% Initialize reference kernels
 % draw square on the data to include as many visible ripples of the scattering as possible 
-same_size = 1;
-kerneltype = 'selected';
-window_type = {'gaussian', 2.5};
+same_size = cfg.reference.same_size;
+kerneltype = cfg.reference.kerneltype;
+window_type = cfg.reference.window_type;
 %window_type = '';
 
 if same_size
     %[square_size] = squareDrawSize(Y_ref);
-    square_size=[80,80];
+    square_size = cfg.reference.square_size;
     kernel_sizes = repmat(square_size,[num_kernels,1]);
-    A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
+    [A1_ref, A1_ref_crop] = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
 else
     A1_ref = cell(1, num_kernels);
+    A1_ref_crop = cell(1, num_kernels);
     kernel_sizes = zeros(num_kernels, 2); % Store sizes of each kernel [height, width]
     for k = 1:num_kernels
         fprintf('Select region for kernel %d/%d\n', k, num_kernels);
         [square_size,position, mask] = squareDrawSize(Y_ref);           	% determine kernel size
         [A1_ref{k}, ~] = gridCropMask(Y_ref, mask);   % the cropped real data as kernel
+        A1_ref_crop{k} = A1_ref{k};
         % Need to put each slice back onto the sphere
         A1_ref{k} = proj2oblique(A1_ref{k});
         % Store the kernel size
-        kernel_sizes(k,:) = size(A1_ref{k});
+        kernel_sizes(k,:) = size(A1_ref_crop{k});
+    end
+end
+for k = 1:num_kernels
+    [A1_ref{k}, flipped_ref] = enforce_kernel_polarity(A1_ref{k}, A1_ref_crop{k});
+    if flipped_ref
+        fprintf('[kernel flip] reference kernel %d flipped\n', k);
     end
 end
 %%
@@ -245,8 +262,8 @@ end
 %% (ESS)noise level determination 
 eta_data = estimate_noise(Y_ref, 'std');  
 
-%% (Opt) determine SNR
-SNR_data= var(A1{1,1}(:))/eta_data;
+%% (Opt) determine SNR (retire)
+SNR_data= var(A1_ref{1}(:))/eta_data;
 fprintf('SNR_data = %d', SNR_data);
 
 %% Block 4: Find Optimal Activation for Reference Slice
@@ -258,19 +275,19 @@ for n = 1:num_kernels
 end
 
 % SBD settings.
-miniloop_iteration = 1;
-outerloop_maxIT= 5;
+miniloop_iteration = cfg.sliceRun.miniloop_iteration;
+outerloop_maxIT= cfg.sliceRun.outerloop_maxIT;
 %params_ref.energy = energy_selected(params.ref_slice);
-params_ref.lambda1 = [0.025, 0.022, 0.025, 0.025, 0.022];  % regularization parameter for Phase I
+params_ref.lambda1 = cfg.sliceRun.lambda1;  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
-params_ref.phase2 = false;
-params_ref.kplus = ceil(0.2 * kernel_sizes);
-params_ref.lambda2 = [0.03, 0.05, 0.05, 0.05];  % FINAL reg. param. value for Phase II
-params_ref.nrefine = 4;
-params_ref.signflip = 0.2;
-params_ref.xpos = true;
-params_ref.getbias = true;
-params_ref.Xsolve = 'FISTA';
+params_ref.phase2 = cfg.sliceRun.phase2;
+params_ref.kplus = ceil(cfg.sliceRun.kplus_factor * kernel_sizes);
+params_ref.lambda2 = cfg.sliceRun.lambda2;  % FINAL reg. param. value for Phase II
+params_ref.nrefine = cfg.sliceRun.nrefine;
+params_ref.signflip = cfg.sliceRun.signflip;
+params_ref.xpos = cfg.sliceRun.xpos;
+params_ref.getbias = cfg.sliceRun.getbias;
+params_ref.Xsolve = cfg.sliceRun.Xsolve;
 
 % noise variance for computeResidualQuality.m
 params_ref.noise_var = eta_data;
@@ -289,7 +306,7 @@ params_ref.noise_var = eta_data;
 [Y_rec,Y_rec_all] = visualizeRealResult(Y_ref,A_ref, X_ref, b_ref, extras_ref);
 
 
-%% compare the Xout vs X manual
+%% compare the Xout vs X manual (retire)
 X0=zeros([size(Y_ref,1),size(Y_ref,2),length(defect_loc)]);
 for i =1:length(defect_loc)
     X0(:,:,i)=locationsToMask(defect_loc{i},[size(Y_ref,1),size(Y_ref,2)]);
@@ -297,8 +314,8 @@ end
 
 [X_ref_aligned, ~, ~] = alignActivationMaps(X0, X_ref, kernel_sizes);
 [X_similarity, ~] = computeActivationSimilarity(X0, X_ref_aligned, kernel_sizes,1);
-%% Pad the A_ref to be size defined by user, normalize and use them as the A1
-target_size = [100, 100];
+%% Pad the A_ref to be size defined by user, normalize and use them as the A1 (retire)
+target_size = cfg.sliceRunPadded.target_size;
 kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
 %kernel_sizes_pad = [[120,120];[120,120];[65,65]];
 A_pre_pad = A_ref;
@@ -334,7 +351,7 @@ for k = 1:num_kernels
     params_ref.xinit{k}.X = X_ref(:,:,k);
     params_ref.xinit{k}.b = extras_ref.phase1.biter(k); 
 end
-%% Set ups before padded run 
+%% Set ups before padded run (retire)
 % Set up display functions
 figure;
 dispfun = cell(1, num_kernels);
@@ -343,38 +360,38 @@ for n = 1:num_kernels
 end
 
 % SBD settings.
-miniloop_iteration = 1;
-outerloop_maxIT= 5;
+miniloop_iteration = cfg.sliceRunPadded.miniloop_iteration;
+outerloop_maxIT= cfg.sliceRunPadded.outerloop_maxIT;
 
-params_ref.lambda1 = [0.03, 0.03, 0.03, 0.03];  % regularization parameter for Phase I
+params_ref.lambda1 = cfg.sliceRunPadded.lambda1;  % regularization parameter for Phase I
 %params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
-params_ref.phase2 = false;
-params_ref.kplus = ceil(0.5 * kernel_sizes);
-params_ref.lambda2 = [2e-2, 2e-2];  % FINAL reg. param. value for Phase II
-params_ref.nrefine = 3;
-params_ref.signflip = 0.2;
-params_ref.xpos = true;
-params_ref.getbias = true;
-params_ref.Xsolve = 'FISTA';
+params_ref.phase2 = cfg.sliceRunPadded.phase2;
+params_ref.kplus = ceil(cfg.sliceRunPadded.kplus_factor * kernel_sizes);
+params_ref.lambda2 = cfg.sliceRunPadded.lambda2;  % FINAL reg. param. value for Phase II
+params_ref.nrefine = cfg.sliceRunPadded.nrefine;
+params_ref.signflip = cfg.sliceRunPadded.signflip;
+params_ref.xpos = cfg.sliceRunPadded.xpos;
+params_ref.getbias = cfg.sliceRunPadded.getbias;
+params_ref.Xsolve = cfg.sliceRunPadded.Xsolve;
 
 % noise variance for computeResidualQuality.m
 params_ref.noise_var = eta_data;
-%% Run the padded initialization 
+%% Run the padded initialization (retire)
 % 2. The fun part
 [A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad] = MT_SBD(Y_ref, kernel_sizes_pad, params_ref, dispfun, A1_ref, miniloop_iteration, outerloop_maxIT);
-%% Visualize Padded result 
+%% Visualize Padded result (retire)
 visualizeRealResult(Y_ref,A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad);
-%% Reconstructed Y 
+%% Reconstructed Y (retire) 
 Y_rec_pad = zeros([size(Y_ref),num_kernels]);
 for k = 1:num_kernels
     Y_rec_pad(:,:,k) = convfft2(A_ref_pad{1,k}, X_ref_pad(:,:,k)) + b_ref_pad(k);
 end
-%% Save the padded ones 
+%% Save the padded ones (retire) 
 padfilename = sprintf('MTSBD_LiFeAs_%f meV.mat',1000*params_ref.energy);
 %save(padfilename,'Y_ref','A_ref_pad', 'X_ref_pad', 'b_ref_pad', 'extras_ref_pad', 'params_ref');
 save(padfilename,'Y_ref','A_ref', 'X_ref', 'b_ref', 'extras_ref', 'params_ref');
 
-%% Block 3: Find Most Isolated Points and Initialize Kernels
+%% Block 3: Find Most Isolated Points and Initialize Kernels (retire the most isolated points logic)
 num_slices = size(Y,3);
 
 % Choose method for kernel center selection
@@ -387,7 +404,7 @@ if choice == 1
     fprintf('Calculating isolation scores and finding most isolated points...\n');
     
     % Choose target kernel sizes first
-    type = 'kernel_sizes_all';
+    type = cfg.isolation.target_kernel_size_type;
     if strcmp(type, 'ref_kernel_sizes')
         target_kernel_sizes = squeeze(kernel_sizes(params.ref_slice,:,:));
     elseif strcmp(type, 'kernel_sizes_cap')
@@ -415,7 +432,7 @@ if choice == 1
         ylabel('Frequency (log scale)');
         
         % Add vertical line for threshold
-        threshold = max(X_ref(:,:,k),[],'all')/10;
+        threshold = max(X_ref(:,:,k),[],'all') / cfg.isolation.activation_threshold_divisor;
         %threshold = 0;
         hold on;
         xline(threshold, 'r--', 'Threshold');
@@ -596,15 +613,35 @@ end
 
 % Initialize kernels for all slices
 A1_all = cell(num_slices, num_kernels);
-matrix = true;  % Use matrix form for A1
-change_size = false;
+ A1_all_crop = cell(num_slices, num_kernels);
+matrix = cfg.blockInit.use_matrix;  % Use matrix form for A1
+change_size = cfg.blockInit.change_size;
 
 for s = 1:num_slices
     fprintf('Initializing kernels for slice %d/%d...\n', s, num_slices);
     if matrix
-        A1_all(s,:) = initialize_kernels_proliferation(Y(:,:,s), num_kernels, kernel_centers, window_type, target_kernel_sizes, 'interactive', change_size);
+        [A1_all(s,:), A1_all_crop(s,:)] = initialize_kernels_proliferation(Y(:,:,s), num_kernels, kernel_centers, window_type, target_kernel_sizes, 'interactive', change_size);
     else 
-        A1_all(s,:) = initialize_kernels_proliferation(Y(:,:,s), num_kernels, kernel_centers, window_type, squeeze(kernel_sizes(s,:,:)), 'interactive', change_size);
+        [A1_all(s,:), A1_all_crop(s,:)] = initialize_kernels_proliferation(Y(:,:,s), num_kernels, kernel_centers, window_type, squeeze(kernel_sizes(s,:,:)), 'interactive', change_size);
+    end
+end
+flip_slices_by_kernel = cell(1, num_kernels);
+for s = 1:num_slices
+    for k = 1:num_kernels
+        [A1_all{s,k}, flipped] = enforce_kernel_polarity(A1_all{s,k}, A1_all_crop{s,k});
+        if flipped
+            flip_slices_by_kernel{k}(end+1) = s; %#ok<AGROW>
+            fprintf('[kernel flip] kernel %d flipped at slice %d\n', k, s);
+        end
+    end
+end
+fprintf('==== Kernel flip summary (block init) ====\n');
+for k = 1:num_kernels
+    if isempty(flip_slices_by_kernel{k})
+        fprintf('Kernel %d: flipped slices = []\n', k);
+    else
+        flip_slices_by_kernel{k} = unique(flip_slices_by_kernel{k});
+        fprintf('Kernel %d: flipped slices = %s\n', k, mat2str(flip_slices_by_kernel{k}));
     end
 end
 
@@ -637,7 +674,7 @@ for k = 1:num_kernels
 end
 
 eta_data3d = estimate_noise3D(Y, 'std');  
-%% Insert previous results
+%% Insert previous results (retire)
 
 for i = 1:5
     % adjust the inplane shift
@@ -645,7 +682,7 @@ for i = 1:5
     A1_all_matrix{i}(:,:,80:130)=Aout_ALL{i};
 end
 
-%%
+%% (retire)
 for i = 1:5
     % adjust the inplane shift
     A1_all_matrix{i} = A1_all_matrix{i}(:,:,70:90);
@@ -666,49 +703,50 @@ A1_used = A1_all_matrix;
 % Automatically determine trusted slices for each kernel.
 % Criterion for slice i and kernel j:
 % std(A1_all_matrix{j}(:,:,i)) / std(noise_i) > threshold
-trusted_ratio_threshold = input('Enter trusted-slice std-ratio threshold (e.g. 1.5): ');
+trusted_ratio_threshold = input(sprintf('Enter trusted-slice std-ratio threshold (e.g. %.2f): ', cfg.blockRun.trusted_ratio_threshold_default));
 if isempty(trusted_ratio_threshold)
-    trusted_ratio_threshold = 1.5;
+    trusted_ratio_threshold = cfg.blockRun.trusted_ratio_threshold_default;
 end
 manual_trusted_slices = cell(1, num_kernels);
-if num_kernels >= 5
+if cfg.blockRun.use_default_manual_trusted_slices && num_kernels >= 5
     manual_trusted_slices{1} = [1,4,5,8,10];
     manual_trusted_slices{2} = [1,5,8,9,10];
     manual_trusted_slices{3} = 7:11;
     manual_trusted_slices{4} = 7:11;
     manual_trusted_slices{5} = [3,5,6,7];
 end
-[slice_weights, slice_weight_details] = build_auto_trusted_slice_weights(A1_used, eta_data3d, trusted_ratio_threshold, true, manual_trusted_slices);
-params.slice_weights = slice_weights;
-params.slice_weight_details = slice_weight_details;
+[params.slice_weights, params.slice_weight_details] = build_auto_trusted_slice_weights(A1_used, eta_data3d, trusted_ratio_threshold, cfg.blockRun.show_trusted_plot, manual_trusted_slices);
 
 %% Run for all_slice
 % SBD settings.
-miniloop_iteration = 1;
-outerloop_maxIT= 8;
+miniloop_iteration = cfg.blockRun.miniloop_iteration;
+outerloop_maxIT= cfg.blockRun.outerloop_maxIT;
 
-params.lambda1_base = [0.018, 0.016, 0.02, 0.02, 0.015];  % base regularization per kernel
+params.lambda1_base = cfg.blockRun.lambda1_base;  % base regularization per kernel
 if numel(params.lambda1_base) ~= num_kernels
     error('params.lambda1_base must have one value per kernel.');
 end
-trusted_counts = slice_weight_details.trusted_counts;
+trusted_counts = params.slice_weight_details.trusted_counts;
 params.lambda1_weighted = sqrt(trusted_counts) .* params.lambda1_base;
 params.lambda1_unweighted = sqrt(num_slices) .* params.lambda1_base;
 params.lambda1 = params.lambda1_unweighted;  % default/fallback for compatibility
 %params.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
-params.phase2 = false;
-params.kplus = ceil(0.5 * kernel_sizes);
-params.lambda2 = [2e-2, 2e-2];  % FINAL reg. param. value for Phase II
-params.nrefine = 3;
-params.signflip = 0.2;
-params.xpos = true;
-params.getbias = true;
-params.Xsolve = 'FISTA';
-params.use_Xregulated = false;
+params.phase2 = cfg.blockRun.phase2;
+params.kplus = ceil(cfg.blockRun.kplus_factor * kernel_sizes);
+params.lambda2 = cfg.blockRun.lambda2;  % FINAL reg. param. value for Phase II
+params.nrefine = cfg.blockRun.nrefine;
+params.signflip = cfg.blockRun.signflip;
+params.xpos = cfg.blockRun.xpos;
+params.getbias = cfg.blockRun.getbias;
+params.Xsolve = cfg.blockRun.Xsolve;
+params.use_Xregulated = cfg.blockRun.use_Xregulated;
 params.noise_var = eta_data3d;
 params.kernel_update_order = 1:num_kernels;  % default update order
 
-use_custom_order = input('Use custom kernel update order for MTSBD_all_slice? (0/1): ');
+use_custom_order = false;
+if cfg.blockRun.allow_custom_update_order
+    use_custom_order = input('Use custom kernel update order for MTSBD_all_slice? (0/1): ');
+end
 if ~isempty(use_custom_order) && use_custom_order
     custom_order = input(sprintf('Enter kernel update permutation of 1:%d (e.g. [2 1 3 ...]): ', num_kernels));
     custom_order = custom_order(:).';
@@ -731,12 +769,12 @@ for n = 1:num_kernels
     dispfun{n} = @(Y, A, X, kernel_sizes_sing, kplus) showims(Y_used, A1_used{n}, X_ref(:,:,n), A, X, kernel_sizes_single, kplus, 1);
 end
 
-% Update params for MTSBD
-for k = 1:num_kernels
-    params.xinit{k}.X = X_ref(:,:,k);
-    b_temp = 0; 
-    params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
-end
+% % Update params for MTSBD
+% for k = 1:num_kernels
+%     params.xinit{k}.X = X_ref(:,:,k);
+%     b_temp = 0; 
+%     params.xinit{k}.b = repmat(b_temp,[num_slices,1]);
+% end
 
 if params.use_Xregulated
     [REG_Aout_ALL, REG_Xout_ALL, REG_bout_ALL, REG_extras_ALL] = MTSBD_Xregulated_all_slices(...
@@ -748,7 +786,7 @@ end
 
 eta3dall = permute(repmat(eta_data3d,[outerloop_maxIT,1]),[2,1]);
 observation_fidelity = eta3dall./squeeze(var(ALL_extras.phase1.residuals, 0, [1,2]));
-save('ZrSiTe0207_meV_[80,80]_trustedslices_test.mat', 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras','params', 'eta_data3d','observation_fidelity');
+save(cfg.io.allslice_output_file, 'Y_used','Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras','params', 'eta_data3d','observation_fidelity');
 
 % plot the observation fidelity  x axis is the number of slices, y is
 % observation fidelity
@@ -768,7 +806,7 @@ for s = 1:num_slices
     end
 end
 
-%% Visualize Reference result 
+%% Visualize Reference result (retire)
 for i = 40: 41
     pp=struct();
     pp.phase1.residuals = ALL_extras.phase1.residuals(:,:,i,:);
@@ -828,7 +866,7 @@ for k = 1:num_kernels
     FT_QPI_Y_rec_each(k,:,:,:) = qpiCalculate(squeeze(Y_rec_each(k,:,:,:)));
 end
 
-%% Normalize and combine Y_rec_each and its FT-QPI using method 2
+%% Normalize and combine Y_rec_each and its FT-QPI using method 2 
 % Reshape Y_rec_each and FT_QPI_Y_rec_each to combine all kernels
 Y_rec_show_Full = [];
 qpi_Y_rec_show_Full = [];
@@ -867,12 +905,12 @@ end
 % Combine normalized reconstructions and their FT-QPI
 Y_show_norm = [Y_full_visualize; qpi_Y_full_visualize];
 
-%% Display the Y_show_norm
+%% Display the Y_show_norm (retire)
 figure;
 d3gridDisplay(Y_show_norm, 'dynamic');
 title('ALL combined');
 
-%% 
+%%  (retire)
 Aout_show = [];
 for i = 1: size(Aout_ALL,1)
     Aout_show = [Aout_show,mat2gray(Aout_ALL{i})];
@@ -881,7 +919,7 @@ end
 figure;
 d3gridDisplay(Aout_show, 'dynamic')
 
-%% 
+%%  (retire)
 qpi_show = [];
 for i = 1: size(Aout_ALL,1)
     qpi_show = [qpi_show,mat2gray(qpiCalculate(Aout_ALL{i}),[0,1])];
@@ -890,7 +928,7 @@ end
 figure;
 d3gridDisplay(qpi_show, 'dynamic')
 
-%% Merge 3 ZrSiTe runs 
+%% Merge 3 ZrSiTe runs (retire) 
 Aout_Full_energy = cell(2,1);
 Aout_Full_energy{1,1}=C;
 Aout_Full_energy{2,1}=D;
@@ -898,7 +936,7 @@ Aout_Full_energy{2,1}=D;
 %%
 save('ZrSiTe_kernel1&2_FULL_[80,80].mat', 'Y_used','Aout_Full_energy', 'Xout_A1', 'Xout_A2');
 
-%% Show FULL&QPI&QPI_padded
+%% Show FULL&QPI&QPI_padded (retire)
 Aout_show_Full = [];
 for i = 1: size(Aout_Full_energy,1)
     Aout_show_Full = [Aout_show_Full,Aout_Full_energy{i}];
@@ -913,7 +951,7 @@ for i = 1: size(Aout_Full_energy,1)
 end
 figure;
 d3gridDisplay(qpi_show_Full, 'dynamic',-1)
-%%
+%% (retire)
 conv2
 qpi_show_Full_pad = [];
 for i = 1: size(Aout_Full_energy,1)
@@ -925,7 +963,7 @@ mid = qpiCalculate(Y_used);
 qpi_show_Full_pad = [qpi_show_Full_pad, (mid-min(mid,[],'all'))/max(mid,[],'all')];
 figure;
 d3gridDisplay(qpi_show_Full_pad, 'dynamic',-1)
-%%
+%% (retire)
 Aout_show_norm = Aout_show_Full;
 qpi_show_norm = qpi_show_Full;
 for i = 1: 200
@@ -945,7 +983,7 @@ for k = 1:length(Aout_ALL)
     figure;
     d3gridDisplay(qpiCalculate(Aout_ALL{k}), 'dynamic')
 end
-%% Pad the output kernels to target sizes
+%% Pad the output kernels to target sizes (retire)
 target_size = [110, 110];  % Same target size as used for reference kernels
 kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
 
@@ -976,7 +1014,7 @@ for s = 1:num_slices
     end
 end
 
-%% Convert A1_all_pad to matrix form and prepare noise
+%% Convert A1_all_pad to matrix form and prepare noise (retire)
 A1_all_pad_matrix = cell(num_kernels,1);
 for k = 1:num_kernels
     A1_all_pad_matrix{k} = zeros(size(A1_all_pad{1,k},1),size(A1_all_pad{1,k},2),num_slices);
@@ -987,7 +1025,7 @@ end
 
 eta_data3d = estimate_noise3D(Y, 'std');  
 
-%% Run for all_pad_slice
+%% Run for all_pad_slice (retire)
 % SBD settings.
 miniloop_iteration = 5;
 outerloop_maxIT= 5;
@@ -1031,10 +1069,10 @@ else
         Y_used, kernel_sizes_pad, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
 end
 
-%% Save results
+%% Save results (retire)
 save('LiFeAs_slices.mat', 'Y_used', 'Aout_ALL', 'Xout_ALL', 'bout_ALL', 'ALL_extras', 'energy_selected');
 
-%% convert Aout_ALL to cell format
+%% convert Aout_ALL to cell format (retire)
 Aout_ALL_cell = cell(num_slices, num_kernels);
 for s = 1:num_slices
     for k = 1:num_kernels
@@ -1042,7 +1080,7 @@ for s = 1:num_slices
     end
 end
 
-%% Visualize result 
+%% Visualize result (retire) 
 for i = 1: size(A1_all,1)
     pp=struct();
     pp.phase1.residuals = ALL_extras.phase1.residuals(:,:,i,:);
@@ -1050,7 +1088,7 @@ for i = 1: size(A1_all,1)
     visualizeRealResult(Y_used(:,:,i), Aout_ALL_cell(i,:), Xout_ALL, bout_ALL(i,:), pp);
 end
 
-%% Block 5: Sequential Processing with MT_SBD.m
+%% Block 5: Sequential Processing with MT_SBD.m (retire)
 % This block processes each slice individually using MT_SBD.m sequentially
 fprintf('\n=== SEQUENTIAL PROCESSING BLOCK ===\n');
 fprintf('Processing each slice individually with MT_SBD.m\n');
@@ -1210,7 +1248,7 @@ end
 
 fprintf('\nSequential processing complete!\n');
 
-%% Visualize sequential results
+%% Visualize sequential results (retire)
 fprintf('\n=== VISUALIZING SEQUENTIAL RESULTS ===\n');
 
 % Convert sequential results to matrix format for visualization
@@ -1418,4 +1456,21 @@ function [slice_weights, details] = build_auto_trusted_slice_weights(A1_all_matr
     details.ratio = ratio;
     details.trusted_slices = trusted_slices;
     details.trusted_counts = trusted_counts;
+end
+
+function [A_out, flipped] = enforce_kernel_polarity(A_in, A_anchor)
+    % Resolve sign ambiguity after kernel normalization/projection.
+    % Without this, equivalent kernels can differ by a global +/-1 factor.
+    A_out = A_in;
+    flipped = false;
+    if nargin < 2 || isempty(A_anchor)
+        [~, idx] = max(abs(A_in(:)));
+        score = A_in(idx);
+    else
+        score = sum(A_in(:) .* A_anchor(:));
+    end
+    if score < 0
+        A_out = -A_in;
+        flipped = true;
+    end
 end

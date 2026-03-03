@@ -1,6 +1,9 @@
-function [corrected_data, streak_mask, streak_indices] = interpolateLocalStreaks(Y, slice_idx, min_value, provided_streak_indices, auto)
+function [corrected_data, streak_mask, streak_indices, final_min_val] = interpolateLocalStreaks(Y, slice_idx, min_value, provided_streak_indices, auto)
 %INTERPOLATELOCALSTREAKS Interactive or automatic streak interpolating tool using Laplacian and neighbor interpolation
-%   [corrected_data, streak_mask, streak_indices] = interpolateLocalStreaks(Y, slice_idx, min_value, provided_streak_indices, auto)
+%   Uses streakCore for Laplacian (mode 'both', max_streak_width 1), mask, and horizontal_avg correction.
+%   [corrected_data, streak_mask, streak_indices] = interpolateLocalStreaks(...)
+%   [corrected_data, streak_mask, streak_indices, final_min_val] = interpolateLocalStreaks(...)
+%   When interactive, on Done final_min_val is the chosen threshold for factor feedback (effective factor = final_min_val/min_low).
 %   If auto==true and min_value is provided, runs in non-interactive, non-visual mode.
 %   Otherwise, runs interactively as before.
 
@@ -19,49 +22,43 @@ end
 corrected_data = [];
 streak_mask = [];
 streak_indices = [];
+final_min_val = [];
 
-data = single(Y(:,:,slice_idx));  % Convert to single precision
+data = single(Y(:,:,slice_idx));
 [rows, cols] = size(data);
 
-% If streak indices are provided, directly apply interpolation (always non-interactive)
+% If streak indices are provided, apply horizontal_avg on that mask (same logic as core)
 if nargin >= 4 && ~isempty(provided_streak_indices)
-    corrected_data = data;
     streak_mask = false(size(data));
-    streak_indices = provided_streak_indices;
-    valid_streaks = false(size(data));
-    valid_streaks(sub2ind(size(data), provided_streak_indices(:,1), provided_streak_indices(:,2))) = true;
-    valid_streaks(:,1) = false;  % Remove first column
-    valid_streaks(:,end) = false;  % Remove last column
-    valid_streaks = valid_streaks & circshift(valid_streaks, [0 -1]) & circshift(valid_streaks, [0 1]);
-    corrected_data(valid_streaks) = (data(circshift(valid_streaks, [0 -1])) + data(circshift(valid_streaks, [0 1]))) / 2;
+    streak_mask(sub2ind(size(data), provided_streak_indices(:,1), provided_streak_indices(:,2))) = true;
+    corrected_data = streakCore('correct', double(data), streak_mask, 'horizontal_avg');
+    valid_streaks = streak_mask;
+    valid_streaks(:,1) = false;
+    valid_streaks(:,end) = false;
+    valid_streaks = valid_streaks & circshift(streak_mask, [0 -1]) & circshift(streak_mask, [0 1]);
     streak_mask = valid_streaks;
+    [streak_rows, streak_cols] = find(streak_mask);
+    streak_indices = [streak_rows, streak_cols];
     return;
 end
 
-% Compute Laplacian efficiently
-L = zeros(size(data), 'single');
-L(:,2:end-1) = data(:,1:end-2) + data(:,3:end) - 2*data(:,2:end-1);
-L_mag = abs(L);
-
-% Set threshold value
+% Single-scale Laplacian (n=1) and horizontal_avg via streakCore
+[L_for_mask, slider_range] = streakCore('laplacian', double(data), 'both', 1);
+L_mag = L_for_mask;
+% Population-ranked threshold list for UI slider (linear in rank, not value)
+lower_list_ui = streakCore('threshold_list', L_mag, 100);
 if isempty(min_value)
-    min_val = min(L_mag(:));
+    min_val = slider_range(1);
 else
     min_val = min_value;
 end
-max_val = max(L_mag(:));
-
-% Compute streak mask
-streak_mask = L_mag >= min_val & L_mag <= max_val;
-valid_streaks = streak_mask;
-valid_streaks(:,1) = false;  % Remove first column
-valid_streaks(:,end) = false;  % Remove last column
-valid_streaks = valid_streaks & circshift(streak_mask, [0 -1]) & circshift(streak_mask, [0 1]);
-
-% Apply interpolation
-corrected = data;
-corrected(valid_streaks) = (data(circshift(valid_streaks, [0 -1])) + data(circshift(valid_streaks, [0 1]))) / 2;
-corrected_data = corrected;
+streak_mask_raw = streakCore('mask', L_for_mask, 'both', min_val);
+corrected_data = streakCore('correct', double(data), streak_mask_raw, 'horizontal_avg');
+% Pixels actually interpolated = middle cols with both neighbors in raw mask
+valid_streaks = streak_mask_raw;
+valid_streaks(:,1) = false;
+valid_streaks(:,end) = false;
+valid_streaks = valid_streaks & circshift(streak_mask_raw, [0 -1]) & circshift(streak_mask_raw, [0 1]);
 streak_mask = valid_streaks;
 [streak_rows, streak_cols] = find(streak_mask);
 streak_indices = [streak_rows, streak_cols];
@@ -78,9 +75,10 @@ if ~auto && isempty(provided_streak_indices)
     colorbar;
     subplot(2, 2, 2);
     h_mask_plot = imagesc(false(size(L_mag)));
-    title('Detected Streak Mask');
+    title('Detected Streak Mask (used for interpolation)');
     axis square;
-    colormap gray;
+    colormap(gca, gray);
+    caxis(gca, [0, 1]);
     colorbar;
     subplot(2, 2, 3);
     h_hist = histogram(L_mag);
@@ -103,25 +101,37 @@ if ~auto && isempty(provided_streak_indices)
         initial_min = min_value;
     end
     uicontrol(panel, 'Style', 'text', 'String', 'Min:', 'Position', [10, 5, 40, 20]);
+    % Slider operates over indices into lower_list_ui (linear in population rank)
+    n_levels = numel(lower_list_ui);
+    if n_levels < 1
+        lower_list_ui = initial_min;
+        n_levels = 1;
+    end
+    [~, initial_idx] = min(abs(lower_list_ui - initial_min));
     min_slider = uicontrol(panel, 'Style', 'slider', ...
-        'Min', min(L_mag(:)), ...
-        'Max', max(L_mag(:))/2, ...
-        'Value', initial_min, ...
+        'Min', 1, ...
+        'Max', n_levels, ...
+        'Value', initial_idx, ...
+        'SliderStep', [1/max(1,n_levels-1), min(1,10/max(1,n_levels-1))], ...
         'Position', [60, 5, 300, 20]);
     min_text = uicontrol(panel, 'Style', 'text', ...
-        'String', sprintf('%.3f', initial_min), ...
+        'String', sprintf('%.3f', lower_list_ui(initial_idx)), ...
         'Position', [370, 5, 60, 20]);
     done_button = uicontrol(panel, 'Style', 'pushbutton', ...
         'String', 'Done', ...
         'Position', [450, 5, 100, 40], ...
         'Callback', @(src,event) finish(src, h_corrected, h_mask_plot));
-    set(min_slider, 'Callback', @(src,event) debouncedUpdate(src, event, h_mask_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button));
-    updateContrast(min_slider, [], h_mask_plot, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button);
+    set(min_slider, 'Callback', @(src,event) debouncedUpdate(src, event, h_mask_plot, min_text, h_corrected, data, L_mag, lower_list_ui, h_min_line, h_max_line, done_button));
+    updateContrast(min_slider, [], h_mask_plot, min_text, h_corrected, data, L_mag, lower_list_ui, h_min_line, h_max_line, done_button);
     waitfor(h_fig);
     if evalin('base', 'exist(''temp_corrected_data'', ''var'')')
         corrected_data = evalin('base', 'temp_corrected_data');
         streak_mask = evalin('base', 'temp_streak_mask');
         streak_indices = evalin('base', 'temp_streak_indices');
+        if evalin('base', 'exist(''temp_final_min_val_interp'', ''var'')')
+            final_min_val = evalin('base', 'temp_final_min_val_interp');
+            evalin('base', 'clear temp_final_min_val_interp');
+        end
         evalin('base', 'clear temp_corrected_data temp_streak_mask temp_streak_indices');
     end
 end
@@ -134,9 +144,12 @@ function finish(src, h_corrected, h_mask)
     min_val = user_data(1).min_val;
     max_val = user_data(1).max_val;
     
-    % Get the results
+    % Store final slider threshold for caller (effective factor = min_val / min_low)
+    assignin('base', 'temp_final_min_val_interp', min_val);
+    
+    % CData is the mask we displayed (valid_streaks) and used for correction
     corrected_data = get(h_corrected, 'CData');
-    streak_mask = get(h_mask, 'CData');
+    streak_mask = logical(get(h_mask, 'CData'));
     [streak_rows, streak_cols] = find(streak_mask);
     streak_indices = [streak_rows, streak_cols];
     
@@ -149,7 +162,7 @@ function finish(src, h_corrected, h_mask)
     close(gcf);
 end
 
-function debouncedUpdate(src, event, h_mask, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button)
+function debouncedUpdate(src, event, h_mask, min_text, h_corrected, data, L_mag, lower_list_ui, h_min_line, h_max_line, done_button)
     persistent lastUpdate
     if isempty(lastUpdate)
         lastUpdate = tic;
@@ -157,39 +170,32 @@ function debouncedUpdate(src, event, h_mask, min_text, h_corrected, data, L_mag,
     
     % Only update if 0.1 seconds have passed since last update
     if toc(lastUpdate) > 0.1
-        updateContrast(src, event, h_mask, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button);
+        updateContrast(src, event, h_mask, min_text, h_corrected, data, L_mag, lower_list_ui, h_min_line, h_max_line, done_button);
         lastUpdate = tic;
     end
 end
 
-function updateContrast(src, ~, h_mask, min_text, h_corrected, data, L_mag, h_min_line, h_max_line, done_button)
-    % Get current values
-    min_val = get(src, 'Value');
-    max_val = max(L_mag(:));
-    
-    % Update binary mask visualization
-    streak_mask = L_mag >= min_val & L_mag <= max_val;
-    set(h_mask, 'CData', streak_mask);
+function updateContrast(src, ~, h_mask, min_text, h_corrected, data, L_mag, lower_list_ui, h_min_line, h_max_line, done_button)
+    % Slider value is an index into lower_list_ui (population-ranked thresholds)
+    idx = round(get(src, 'Value'));
+    idx = max(1, min(numel(lower_list_ui), idx));
+    set(src, 'Value', idx);
+    min_val = lower_list_ui(idx);
+
+    streak_mask_raw = streakCore('mask', L_mag, 'both', min_val);
+    corrected = streakCore('correct', double(data), streak_mask_raw, 'horizontal_avg');
+    valid_streaks = streak_mask_raw;
+    valid_streaks(:,1) = false;
+    valid_streaks(:,end) = false;
+    valid_streaks = valid_streaks & circshift(streak_mask_raw, [0 -1]) & circshift(streak_mask_raw, [0 1]);
+    set(h_mask, 'CData', double(valid_streaks));
+    caxis(h_mask.Parent, [0, 1]);
     caxis(h_corrected.Parent, [min(data(:)), max(data(:))]);
     set(min_text, 'String', sprintf('%.3f', min_val));
     set(h_min_line, 'Value', min_val);
-    set(h_max_line, 'Value', max_val);
-    
-    % Process valid streaks
-    valid_streaks = streak_mask;
-    valid_streaks(:,1) = false;  % Remove first column
-    valid_streaks(:,end) = false;  % Remove last column
-    valid_streaks = valid_streaks & circshift(streak_mask, [0 -1]) & circshift(streak_mask, [0 1]);
-    
-    % Apply interpolation
-    corrected = data;
-    corrected(valid_streaks) = (data(circshift(valid_streaks, [0 -1])) + data(circshift(valid_streaks, [0 1]))) / 2;
-    
-    % Update display
+    set(h_max_line, 'Value', max(L_mag(:)));
     set(h_corrected, 'CData', corrected);
-    
-    % Store values for finish function
-    set(done_button, 'UserData', struct('min_val', min_val, 'max_val', max_val));
+    set(done_button, 'UserData', struct('min_val', min_val, 'max_val', max(L_mag(:))));
 end
 
 

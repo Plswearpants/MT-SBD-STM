@@ -1,4 +1,4 @@
-function A1 = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, window_type, target_kernel_size, varargin)
+function [A1, A1_crop] = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, window_type, target_kernel_size, varargin)
     % Initialize kernels for proliferation case using pre-defined centers
     % Inputs:
     %   Y: input image
@@ -53,6 +53,7 @@ function A1 = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, w
     
     % Initialize output
     A1 = cell(1, num_kernels);
+    A1_crop = cell(1, num_kernels);
     [img_height, img_width] = size(Y);
     
     % Store final kernel sizes
@@ -134,7 +135,7 @@ function A1 = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, w
         selected_kernel = Y(y1:y2, x1:x2);
         % Ensure selected_kernel matches target_kernel_size
         current_size = size(selected_kernel);
-        target_size = target_kernel_size; % [height, width]
+        target_size = target_kernel_size(n,:); % [height, width]
 
         % Pad if too small
         pad_height = max(0, target_size(1) - current_size(1));
@@ -146,9 +147,10 @@ function A1 = initialize_kernels_proliferation(Y, num_kernels, kernel_centers, w
         % Crop if too large
         selected_kernel = selected_kernel(1:target_size(1), 1:target_size(2));
         
+        A1_crop{n} = selected_kernel;
+        
         % Project onto the oblique manifold and apply window
         A1{n} = proj2oblique(selected_kernel);
-        disp(size(A1{n}));
         A1{n} = apply_window(A1{n}, window_type);
         
         fprintf('Kernel %d initialized at center (%d,%d) with size [%d,%d]\n', ...

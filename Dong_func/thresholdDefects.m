@@ -1,14 +1,14 @@
-function [Y_masked, defect_mask] = thresholdDefects(Y, threshold_slice)
+function [Y_masked, defect_mask, lower_threshold, upper_threshold] = thresholdDefects(Y, threshold_slice)
     % Interactive thresholding of defects in 3D data
     %
     % Inputs:
     %   Y: 3D data array [height x width x depth]
     %   threshold_slice: (optional) slice number to use for thresholding
-    %                    if not provided, will ask user to select
     %
     % Outputs:
-    %   Y_masked: 3D data with defects masked/interpolated
-    %   defect_mask: binary mask of defects (true for defects)
+    %   Y_masked: 3D data with defects clamped to threshold range
+    %   defect_mask: binary mask (true for defect pixels)
+    %   lower_threshold, upper_threshold: values used (for replay)
     
     % Create a figure for thresholding
     f_threshold = figure('Name', 'Defect Thresholding', 'Position', [100, 100, 1200, 600]);
@@ -111,7 +111,13 @@ function [Y_masked, defect_mask] = thresholdDefects(Y, threshold_slice)
         'Position', [500, 10, 100, 30], ...
         'String', 'Confirm', ...
         'Callback', @confirmThreshold);
-    
+
+    % Shared results for callback (for returning thresholds after uiwait)
+    result_Y_masked = [];
+    result_defect_mask = [];
+    result_lower = [];
+    result_upper = [];
+
     % Callback functions
     function updateLowerThreshold(value)
         lower_threshold = value;
@@ -152,6 +158,12 @@ function [Y_masked, defect_mask] = thresholdDefects(Y, threshold_slice)
         Y_masked(Y < lower_threshold) = lower_threshold;
         Y_masked(Y > upper_threshold) = upper_threshold;
         
+        % Store for return (so caller gets thresholds for replay)
+        result_Y_masked = Y_masked;
+        result_defect_mask = defect_mask;
+        result_lower = lower_threshold;
+        result_upper = upper_threshold;
+        
         % Display the result
         figure;
         subplot(1,2,1);
@@ -168,7 +180,8 @@ function [Y_masked, defect_mask] = thresholdDefects(Y, threshold_slice)
         axis image;
         caxis([min(Y_masked(:)), max(Y_masked(:))]);  % Apply autocontrast
         
-        % Close the thresholding figure
+        % Close the thresholding figure and resume
+        uiresume(f_threshold);
         close(f_threshold);
     end
     
@@ -177,4 +190,9 @@ function [Y_masked, defect_mask] = thresholdDefects(Y, threshold_slice)
     
     % Wait for user to confirm
     uiwait(f_threshold);
+    
+    Y_masked = result_Y_masked;
+    defect_mask = result_defect_mask;
+    lower_threshold = result_lower;
+    upper_threshold = result_upper;
 end 
