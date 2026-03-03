@@ -73,12 +73,24 @@ end
 
 %% -------------------------------------------------------------------------
 function mask = maskFromThreshold(L_for_mask, mode, threshold)
+    % Base Laplacian threshold mask
     if strcmpi(mode, 'valley')
         mask = (L_for_mask > threshold);
     elseif strcmpi(mode, 'plateau')
         mask = (L_for_mask < threshold);
     else
         mask = (L_for_mask >= threshold);
+    end
+
+    % Enforce vertical continuity: remove isolated pixels that have no vertical
+    % neighbor (above or below) also marked as streak. Top row only checks the
+    % pixel below, bottom row only checks the pixel above.
+    [rows, cols] = size(mask);
+    if rows > 1
+        neighbor_up   = [false(1, cols); mask(1:end-1, :)];
+        neighbor_down = [mask(2:end, :); false(1, cols)];
+        has_vertical_neighbor = neighbor_up | neighbor_down;
+        mask = mask & has_vertical_neighbor;
     end
 end
 

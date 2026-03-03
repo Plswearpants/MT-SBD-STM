@@ -61,7 +61,7 @@ cfg = init_config();
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
 cfg.load.data_file       = 'QPImap012.3ds';  % raw file name (or [] to pick via UI)
-cfg.load.smoothing_sigma = 8;               % smoothing for current data
+cfg.load.smoothing_sigma = 10;               % smoothing for current data
 
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
