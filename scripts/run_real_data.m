@@ -93,6 +93,24 @@ params.preprocessing.save_checkpoint = true;   % write preprocess checkpoint
 [log, data, params, meta, cfg] = preprocessRealData(log, data, params, meta, cfg);
 
 
+%% Save preprocess checkpoint
+if isfield(params, 'preprocessing') && isfield(params.preprocessing, 'save_checkpoint') ...
+        && params.preprocessing.save_checkpoint
+    % Determine output file name
+    if isfield(cfg, 'io') && isfield(cfg.io, 'preprocess_output_file') && ~isempty(cfg.io.preprocess_output_file)
+        preprocess_file = cfg.io.preprocess_output_file;
+    else
+        base = 'realdata';
+        if isfield(cfg, 'load') && isfield(cfg.load, 'data_file') && ~isempty(cfg.load.data_file)
+            [~, base, ~] = fileparts(cfg.load.data_file);
+        end
+        preprocess_file = sprintf('%s_preprocess_checkpoint.mat', base);
+    end
+    save(preprocess_file, 'log', 'data', 'params', 'meta', 'cfg', '-v7.3');
+    fprintf('Saved preprocess checkpoint to %s\n', preprocess_file);
+end
+
+
 %% =========================================================================
 %% RS01A: RefSlice-Real-01-A; Decompose reference slice
 %  =========================================================================
@@ -110,12 +128,26 @@ params.preprocessing.save_checkpoint = true;   % write preprocess checkpoint
 params.refSlice.interactive     = true;   % interactive reference-slice & kernel selection
 params.refSlice.save_checkpoint = true;
 
-cfg.reference.same_size       = true;
-cfg.reference.kerneltype      = 'selected';
-cfg.reference.window_type     = {'gaussian', 2.5};
-cfg.reference.square_size     = [80, 80];
-cfg.reference.default_ref_slice    = [];   % or set to use as default
-cfg.reference.default_num_kernels = [];   % or set to use as default
+% Reference-kernel initialization (used by decomposeRefSliceReal)
+cfg.reference.same_size            = true;              % all kernels same size?
+cfg.reference.kerneltype           = 'selected';        % 'selected' or other modes supported by initialize_kernels
+cfg.reference.window_type          = {'gaussian', 2.5}; %window applied to kernels
+cfg.reference.square_size          = [80, 80];          % [height,width] for same_size=true
+cfg.reference.default_ref_slice    = [];                % optional default reference slice (empty = prompt)
+cfg.reference.default_num_kernels  = [];                % optional default #kernels (empty = prompt)
+
+% MT-SBD settings for the reference slice (cfg.sliceRun)
+cfg.sliceRun.miniloop_iteration = 2;
+cfg.sliceRun.outerloop_maxIT    = 5;
+cfg.sliceRun.lambda1            = [0.025, 0.025, 0.02, 0.02, 0.02];  % Phase I regularization
+cfg.sliceRun.phase2             = false;
+cfg.sliceRun.kplus_factor       = 0.2;                        % kplus = ceil(kplus_factor * kernel_sizes)
+cfg.sliceRun.lambda2            = [0.04, 0.04, 0.04, 0.04, 0.04];  % Phase II regularization
+cfg.sliceRun.nrefine            = 4;
+cfg.sliceRun.signflip           = 0.2;
+cfg.sliceRun.xpos               = true;
+cfg.sliceRun.getbias            = true;
+cfg.sliceRun.Xsolve             = 'FISTA';
 
 %%%%%%%%%%%%%%%%%% DO NOT EDIT BELOW %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %
@@ -146,6 +178,31 @@ cfg.blockInit.change_size = false;
 [log, data, params, meta, cfg] = initProliferationReal(log, data, params, meta, cfg);
 
 
+%% Save pre-run checkpoint (before block run; stakes are high)
+% -------------------------------------------------------------------------
+% PRESETS: set to false to skip saving before block run
+% -------------------------------------------------------------------------
+if ~isfield(params, 'preRun')
+    params.preRun = struct();
+end
+if ~isfield(params.preRun, 'save_checkpoint')
+    params.preRun.save_checkpoint = true;   % save ref slice + proliferation before block run
+end
+if params.preRun.save_checkpoint
+    if isfield(cfg, 'io') && isfield(cfg.io, 'prerun_output_file') && ~isempty(cfg.io.prerun_output_file)
+        prerun_file = cfg.io.prerun_output_file;
+    else
+        base = 'realdata';
+        if isfield(cfg, 'load') && isfield(cfg.load, 'data_file') && ~isempty(cfg.load.data_file)
+            [~, base, ~] = fileparts(cfg.load.data_file);
+        end
+        prerun_file = sprintf('%s_prerun_checkpoint.mat', base);
+    end
+    save(prerun_file, 'log', 'data', 'params', 'meta', 'cfg', '-v7.3');
+    fprintf('Saved pre-run checkpoint to %s (before block run).\n', prerun_file);
+end
+
+
 %% =========================================================================
 %% BR01A: Block-Run-Real-01-A; Decompose all slices (block run)
 %  =========================================================================
@@ -161,14 +218,20 @@ cfg.blockInit.change_size = false;
 % PRESETS: User-configurable parameters
 % -------------------------------------------------------------------------
 params.blockRun.interactive     = true;
-params.blockRun.save_checkpoint = true;
+params.blockRun.save_checkpoint = false;
+params.blockRun.slices_to_run   = [115,170]; % [] = all slices; or e.g. 1:10, [1 3 5], or logical mask
 
+% Optional: set to save block-run checkpoint to a specific file (else *_blockrun_checkpoint.mat)
+% cfg.io.blockrun_output_file = 'my_blockrun.mat';
+
+cfg.blockRun.use_trusted_slice_weights = false; % set true if build_auto_trusted_slice_weights is on path
 cfg.blockRun.trusted_ratio_threshold_default = 1.5;
 cfg.blockRun.use_default_manual_trusted_slices = true;
 cfg.blockRun.show_trusted_plot  = true;
+
 cfg.blockRun.miniloop_iteration = 1;
-cfg.blockRun.outerloop_maxIT    = 8;
-cfg.blockRun.lambda1_base       = [0.018, 0.016, 0.02, 0.02, 0.015];
+cfg.blockRun.outerloop_maxIT    = 3;
+cfg.blockRun.lambda1_base       = [0.015, 0.015, 0.015, 0.015, 0.015];
 cfg.blockRun.phase2             = false;
 cfg.blockRun.kplus_factor        = 0.5;
 cfg.blockRun.lambda2            = [2e-2, 2e-2];

@@ -149,9 +149,10 @@ function [A1, A1_crop] = initialize_kernels_proliferation(Y, num_kernels, kernel
         
         A1_crop{n} = selected_kernel;
         
-        % Project onto the oblique manifold and apply window
-        A1{n} = proj2oblique(selected_kernel);
-        A1{n} = apply_window(A1{n}, window_type);
+        % Normalize – window – normalize pipeline (best practice)
+        A1{n} = proj2oblique(selected_kernel);   % 1. normalize
+        A1{n} = apply_window(A1{n}, window_type); % 2. window
+        A1{n} = proj2oblique(A1{n});             % 3. re-normalize (||A1{n}||_F = 1)
         
         fprintf('Kernel %d initialized at center (%d,%d) with size [%d,%d]\n', ...
             n, center_y, center_x, kernel_sizes(n,1), kernel_sizes(n,2));

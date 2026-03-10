@@ -72,27 +72,46 @@ function [log, data, params, meta, cfg] = decomposeRefSliceReal(log, data, param
     close;
 
     % ---------------------------------------------------------------------
-    % Initialize reference kernels (initialize_kernels)
+    % Initialize or reuse reference kernels
     % ---------------------------------------------------------------------
-    same_size   = cfg.reference.same_size;
-    kerneltype  = cfg.reference.kerneltype;
-    window_type = cfg.reference.window_type;
+    use_existing_kernels = false;
+    if isfield(data.real, 'ref') && isfield(data.real.ref, 'A1_ref') ...
+            && isfield(data.real.ref, 'A1_ref_crop') && isfield(data.real.ref, 'kernel_sizes')
+        if isfield(params, 'refSlice') && isfield(params.refSlice, 'interactive') && params.refSlice.interactive
+            reply = input('Existing reference kernels found. Use them instead of initializing new ones? (y/n): ', 's');
+            use_existing_kernels = strcmpi(strtrim(reply), 'y') || strcmpi(strtrim(reply), 'yes');
+        else
+            use_existing_kernels = true;
+        end
+    end
 
-    if same_size
-        square_size = cfg.reference.square_size;
-        kernel_sizes = repmat(square_size, [num_kernels, 1]);
-        [A1_ref, A1_ref_crop] = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
+    if use_existing_kernels
+        A1_ref      = data.real.ref.A1_ref;
+        A1_ref_crop = data.real.ref.A1_ref_crop;
+        kernel_sizes = data.real.ref.kernel_sizes;
+        num_kernels = numel(A1_ref);
+        fprintf('Reusing %d existing reference kernels.\n', num_kernels);
     else
-        A1_ref = cell(1, num_kernels);
-        A1_ref_crop = cell(1, num_kernels);
-        kernel_sizes = zeros(num_kernels, 2);
-        for k = 1:num_kernels
-            fprintf('Select region for kernel %d/%d\n', k, num_kernels);
-            [square_size, position, mask] = squareDrawSize(Y_ref); %#ok<NASGU>
-            [A1_ref{k}, ~] = gridCropMask(Y_ref, mask);
-            A1_ref_crop{k} = A1_ref{k};
-            A1_ref{k} = proj2oblique(A1_ref{k});
-            kernel_sizes(k,:) = size(A1_ref_crop{k});
+        same_size   = cfg.reference.same_size;
+        kerneltype  = cfg.reference.kerneltype;
+        window_type = cfg.reference.window_type;
+
+        if same_size
+            square_size = cfg.reference.square_size;
+            kernel_sizes = repmat(square_size, [num_kernels, 1]);
+            [A1_ref, A1_ref_crop] = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
+        else
+            A1_ref = cell(1, num_kernels);
+            A1_ref_crop = cell(1, num_kernels);
+            kernel_sizes = zeros(num_kernels, 2);
+            for k = 1:num_kernels
+                fprintf('Select region for kernel %d/%d\n', k, num_kernels);
+                [square_size, position, mask] = squareDrawSize(Y_ref); %#ok<NASGU>
+                [A1_ref{k}, ~] = gridCropMask(Y_ref, mask);
+                A1_ref_crop{k} = A1_ref{k};
+                A1_ref{k} = proj2oblique(A1_ref{k});
+                kernel_sizes(k,:) = size(A1_ref_crop{k});
+            end
         end
     end
 

@@ -25,10 +25,11 @@ function [A1, A1_crop] = initialize_kernels(Y, num_kernels, kernel_sizes, kernel
             for n = 1:num_kernels
                 raw_kernel = randn(kernel_sizes(n,:));
                 A1_crop{n} = raw_kernel;
+                % Normalize – window – normalize pipeline when window specified
                 A1{n} = proj2oblique(raw_kernel);
-                % Apply window if specified
                 if ~isempty(window_type)
                     A1{n} = apply_window(A1{n}, window_type);
+                    A1{n} = proj2oblique(A1{n});
                 end
             end
 
@@ -78,16 +79,15 @@ function [A1, A1_crop] = initialize_kernels(Y, num_kernels, kernel_sizes, kernel
 
                 selected_kernel = Y(y1:y2, x1:x2);
                 A1_crop{n} = selected_kernel;
-
-                % Project onto the oblique manifold
-                A1{n} = proj2oblique(selected_kernel);
-                %A1{n} = (selected_kernel);
                 
-                % Apply window if specified
+
+                % Normalize – window – normalize pipeline (best practice)
+                A1{n} = proj2oblique(selected_kernel);
                 if ~isempty(window_type)
                     A1{n} = apply_window(A1{n}, window_type);
                 end
-                
+                A1{n} = proj2oblique(A1{n});
+
                 % Delete the center dot
                 delete(h_dot);
             end

@@ -119,5 +119,5 @@ preprocessing_params.real_space_direction = 'horizontal';
 [Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
 
 %% 3. ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('ZrSiTe0303_FULL.mat', 'data_original', 'Y', 'data_cropped','data_masked',"energy_range", 'preprocessing_params')
+save('ZrSiTe0304_FULL.mat', 'data_original', 'Y', 'data_cropped','data_masked',"energy_range", 'preprocessing_params')
 

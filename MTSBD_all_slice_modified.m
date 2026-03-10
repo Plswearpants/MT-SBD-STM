@@ -1,4 +1,4 @@
-function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
+function [ Aout, Xout, bout, extras ] = MTSBD_all_slice_modified( Y, k, params, dispfun, kernel_initialguess, Max_iteration, maxIT)
     %SBD Summary of this function goes here
     %
     %   PARAMS STRUCT:
@@ -148,8 +148,10 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
         end
     end
     
-    % Add demixing factor
-    faint_factor = 1;
+    % Demixing blend schedule (depends on maxIT):
+    % faint_factor(iter) transitions from 0.5 (first iteration) to 0.1 (last).
+    faint_factor_first = 0.5;
+    faint_factor_last = 0.1;
     
     kernel_time_total = 0;
     total_phase1_sum = 0;
@@ -159,21 +161,26 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
         iter_starttime = tic;
         
         % Compute Y_background with demixing approach
-        Y_sum = zeros(size(Y));
+
+        Y_mainloop_perkernel = zeros(size(Y,1),size(Y,2),size(Y,3),kernel_num);
+
         for m = 1:kernel_num
-            X_current = Xiter(:,:,m);
-            Y_sum = Y_sum + convfft3(A{m}, X_current(:,:,ones(1,size(Y_sum,3))));
+            Y_mainloop_perkernel(:,:,:,m) = convfft3(A{m},Xiter(:,:,m)) + reshape(biter(:,m),1,1,size(biter,1));
         end
 
-        Y_residual = Y - Y_sum;
-        
         % Update each kernel
         for ord_idx = 1:kernel_num
             t_miniloop_start = tic;
             n = kernel_update_order(ord_idx);
-            X_current = Xiter(:,:,n);
-            Yiter = Y_residual + (1-1/(faint_factor*iter+1))*convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3)))) + (1/(faint_factor*iter+1))*Y_sum;
-            Y_residual_pre = Y_residual + convfft3(A{n}, X_current(:,:,ones(1,size(Y_sum,3))));
+            Y_sum = sum(Y_mainloop_perkernel,4);
+            % update Y_residual 
+            Y_residual = Y - Y_sum;
+            if maxIT > 1
+                faint_factor = faint_factor_first + (faint_factor_last - faint_factor_first) * ((iter - 1) / (maxIT - 1));
+            else
+                faint_factor = faint_factor_first;
+            end
+            Yiter = Y_residual + (1-faint_factor)*Y_mainloop_perkernel(:,:,:,n) + faint_factor*Y_sum;
             dispfun1 = @(A, X) dispfun{n}(Y(:,:,1), A(:,:,1), X, k(n,:), []);
             
             % Initial X computation only on first iteration if no initial guess is provided
@@ -189,12 +196,17 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
             
             Xiter(:,:,n) = X_struct.(['x',num2str(n)]).X;
             biter(:,n) = X_struct.(['x',num2str(n)]).b;
-            temp = Xiter(:,:,n);
-            Y_residual = Y_residual_pre - convfft3(A{n},temp(:,:,ones(1,size(Y_sum,3))));
+            % update Y_mainloop_perkernel for this kernel type 
+            Y_mainloop_perkernel(:,:,:,n)=convfft3(A{n},Xiter(:,:,n))+reshape(biter(:,n),1,1,size(biter,1));
+            
             ktime = toc(t_miniloop_start);
             kernel_time_total = kernel_time_total + ktime;
             fprintf('kernel %d finished, runtime = %.2fs\n', n, ktime);
         end
+        % Recompute residual after all kernel updates so metrics use
+        % the final state of this outer iteration (not a stale inner-loop value).
+        Y_sum = sum(Y_mainloop_perkernel,4);
+        Y_residual = Y - Y_sum;
         residual_var = reshape(var(Y_residual, 0, [1,2]),[1,size(Y,3)]);
         % Calculate quality metric
         quality_metric = mean(noise_var ./ residual_var);
@@ -233,17 +245,20 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
         for i = 1:nrefine + 1
             fprintf('lambda iteration %d/%d: \n', i, nrefine + 1);
             
-            % Standard Y_residual calculation (no demixing)
+            % Build per-kernel reconstruction cache for this refinement.
+            Y_phase2_perkernel = zeros([size(Y), kernel_num]);
             for m = 1:kernel_num
-                Y_sum = Y_sum + convfft2(A2{m}, X2_struct.(['x',num2str(m)]).X);
+                Y_phase2_perkernel(:,:,:,m) = convfft2(A2{m}, X2_struct.(['x',num2str(m)]).X) ...
+                    + reshape(X2_struct.(['x',num2str(m)]).b, 1, 1, []);
             end
-            Y_residual = Y - Y_sum;
     
             for ord_idx = 1:kernel_num
                 n = kernel_update_order(ord_idx);
                 fprintf('Processing kernel %d, lambda = %.1e: \n', n, lambda(n));
                 % Calculate Yiter without demixing
-                Yiter = Y_residual + convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X);
+                Y_sum = sum(Y_phase2_perkernel, 4);
+                Y_residual = Y - Y_sum;
+                Yiter = Y_residual + Y_phase2_perkernel(:,:,:,n);
                 
                 dispfun2 = @(A, X) dispfun{n}(Y, A, X, k3(n,:), kplus(n,:));
                 [A2{n}, X2_struct.(['x',num2str(n)]), info] = Asolve_Manopt_tunable(Yiter, A2{n}, lambda(n), Xsolve, X2_struct.(['x',num2str(n)]), xpos, getbias, dispfun2, slice_weights(:,n));
@@ -263,6 +278,10 @@ function [ Aout, Xout, bout, extras ] = MTSBD_all_slice( Y, k, params, dispfun, 
                 A2{n} = circshift(A2{n},-tau);
                 X2_struct.(['x',num2str(n)]).X = circshift(X2_struct.(['x',num2str(n)]).X,tau);
                 X2_struct.(['x',num2str(n)]).W = circshift(X2_struct.(['x',num2str(n)]).W,tau);
+
+                % Refresh only the updated kernel contribution.
+                Y_phase2_perkernel(:,:,:,n) = convfft2(A2{n}, X2_struct.(['x',num2str(n)]).X) ...
+                    + reshape(X2_struct.(['x',num2str(n)]).b, 1, 1, []);
     
                 % Save phase 2 extras
                 extras.phase2.A{n} = A2{n};

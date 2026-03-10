@@ -108,7 +108,7 @@ function [log, data, params, meta, cfg] = preprocessRealData(log, data, params, 
         cfgFields = { ...
             "do_bragg_remove", true; "do_crop", true; "do_slice_select", true; ...
             "do_manual_streak", true; "do_auto_streak", true; "do_defect_mask", true; ...
-            "do_streak_correct", true; "do_heal", true; "do_directional_plane", false ...
+            "do_streak_correct", true; "do_interp", true; "do_heal", true; "do_directional_plane", false ...
         };
         for i = 1:size(cfgFields,1)
             if ~isfield(params.preprocessing, cfgFields{i,1})
@@ -150,18 +150,7 @@ function [log, data, params, meta, cfg] = preprocessRealData(log, data, params, 
         end
     end
 
-    % --- 2.2 Crop ---
-    run_step = getRunStep('crop', interactive, step_names, preprocessing_params, params);
-    if run_step
-        mask = maskSquare(data_carried, 0, 40, 'square');
-        data_cropped = gridCropMask(data_carried, mask);
-        data_carried = data_cropped;
-        preprocessing_params.steps.flags(strcmp(step_names,'crop')) = true;
-    else
-        data_cropped = data_carried;
-    end
-
-    % --- 2.3 Slice selection ---
+    % --- 2.2 Slice selection ---
     run_step = getRunStep('slice_select', interactive, step_names, preprocessing_params, params);
     if run_step
         if interactive
@@ -183,8 +172,8 @@ function [log, data, params, meta, cfg] = preprocessRealData(log, data, params, 
         preprocessing_params.slices = 1:numel(energy_range);
     end
 
-    % --- 2.4 Streak removal (one run prompt: manual on first slice, then auto on all, repeat/end) ---
-    % Replay: preprocessRealData calls wrapper with interactive=false and streak_params → wrapper runs auto only.
+    % --- 2.3 Streak removal (single reference slice, applied to all slices) ---
+    % Replay: preprocessRealData calls wrapper with interactive=false and streak_params.
     run_streak = getRunStreakStep(interactive, step_names, preprocessing_params, params);
     if run_streak
         if interactive
@@ -198,7 +187,7 @@ function [log, data, params, meta, cfg] = preprocessRealData(log, data, params, 
         preprocessing_params.steps.flags(strcmp(step_names,'auto_streak')) = true;
     end
 
-    % --- 2.5 Defect masking ---
+    % --- 2.4 Defect masking ---
     run_step = getRunStep('defect_mask', interactive, step_names, preprocessing_params, params);
     if run_step
         [data_carried, preprocessing_params] = applyNormalize(data_carried, rangetype, NORM_SLICE, preprocessing_params);
@@ -229,6 +218,17 @@ function [log, data, params, meta, cfg] = preprocessRealData(log, data, params, 
         data_masked = data_carried;
     end
 
+    % --- 2.5 Crop (after defect masking) ---
+    run_step = getRunStep('crop', interactive, step_names, preprocessing_params, params);
+    if run_step
+        mask = maskSquare(data_carried, 0, 1, 'square');
+        data_cropped = gridCropMask(data_carried, mask);
+        data_carried = data_cropped;
+        preprocessing_params.steps.flags(strcmp(step_names,'crop')) = true;
+    else
+        data_cropped = data_carried;
+    end
+
     % --- 2.6a Streak correct ---
     run_step = getRunStep('streak_correct', interactive, step_names, preprocessing_params, params);
     if run_step
@@ -238,7 +238,41 @@ function [log, data, params, meta, cfg] = preprocessRealData(log, data, params, 
         preprocessing_params.steps.flags(strcmp(step_names,'streak_correct')) = true;
     end
 
-    % --- 2.6b Heal ---
+    % --- 2.6b Interpolation using single reference slice workflow ---
+    if run_streak
+        % Ask whether to run interpolation (interactive) or decide from stored params (replay)
+        run_interp = true;
+        if interactive
+            defaultRun = true;
+            if isfield(params.preprocessing, 'do_interp')
+                defaultRun = params.preprocessing.do_interp;
+            end
+            fprintf('Process: interpolation (single reference slice)\n');
+            reply = input('Run? (y/skip): ', 's');
+            run_interp = strcmpi(strtrim(reply), 'y') || strcmpi(strtrim(reply), 'yes');
+            if isempty(strtrim(reply))
+                run_interp = defaultRun;
+            end
+        else
+            run_interp = isfield(preprocessing_params, 'interp_params') && ~isempty(preprocessing_params.interp_params);
+        end
+
+        if run_interp
+            if interactive
+                opts_interp = struct();
+                [data_carried, interp_params] = interpRemovalWorkflow(data_carried, true, opts_interp);
+            else
+                interp_params = [];
+                if isfield(preprocessing_params, 'interp_params') && ~isempty(preprocessing_params.interp_params)
+                    opts_interp = struct('interp_params', preprocessing_params.interp_params);
+                    [data_carried, interp_params] = interpRemovalWorkflow(data_carried, false, opts_interp);
+                end
+            end
+            preprocessing_params.interp_params = interp_params;
+        end
+    end
+
+    % --- 2.6c Heal ---
     run_step = getRunStep('heal', interactive, step_names, preprocessing_params, params);
     if run_step
         [data_carried, preprocessing_params] = applyNormalize(data_carried, rangetype, NORM_SLICE, preprocessing_params);
@@ -253,7 +287,7 @@ function [log, data, params, meta, cfg] = preprocessRealData(log, data, params, 
         preprocessing_params.steps.flags(strcmp(step_names,'heal')) = true;
     end
 
-    % --- 2.6c Directional plane (retired) ---
+    % --- 2.6d Directional plane (retired) ---
     run_step = getRunStep('directional_plane', interactive, step_names, preprocessing_params, params);
     if run_step
         [data_carried, preprocessing_params] = applyNormalize(data_carried, rangetype, NORM_SLICE, preprocessing_params);
