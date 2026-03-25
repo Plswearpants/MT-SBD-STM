@@ -1,4 +1,4 @@
-function [data2D, angles, radius] = rotationalslices(data3D, rangetype, line_width, radius)
+function [data2D, angles, radius] = rotationalslices(data3D, rangetype, line_width, radius, naked, energy_range)
 % ROTATIONAL_SLICES Creates 2D slices from 3D data by rotating a line through the center
 %   This function creates a series of 2D slices by rotating a line through the center
 %   of the data at different angles. The user adjusts a pre-drawn circle to determine the line length.
@@ -8,6 +8,8 @@ function [data2D, angles, radius] = rotationalslices(data3D, rangetype, line_wid
 %   rangetype - 'dynamic' (normalized per slice), 'global' (raw data), or 'log' (logarithmic scaling)
 %   line_width - Width of the line in pixels (default: 1)
 %   radius - Optional radius for the circle. If not provided, user will be prompted to draw a circle
+%   naked - If true, hide plot decorations but keep interactive controls
+%   energy_range - Optional [Emin, Emax] in meV for slice-energy readout
 %
 % Outputs:
 %   data2D - 3D array where:
@@ -29,11 +31,23 @@ arguments
     rangetype {mustBeMember(rangetype, {'dynamic', 'global', 'log'})} = 'dynamic'
     line_width {mustBeInteger, mustBePositive} = 1
     radius {mustBeNumeric} = []
+    naked (1,1) logical = false
+    energy_range (1,2) double = [NaN NaN]
 end
 
 % Calculate center point
 [rows, cols, ~] = size(data3D);
 center = [floor(rows/2)+1, floor(cols/2)+1];
+num_slices = size(data3D,3);
+
+% Build energy axis for readout; fallback to slice index when not provided.
+if all(isfinite(energy_range))
+    energy_axis = linspace(energy_range(1), energy_range(2), num_slices);
+    energy_unit = 'meV';
+else
+    energy_axis = 1:num_slices;
+    energy_unit = 'idx';
+end
 
 % If radius not provided, get it interactively
 if isempty(radius)
@@ -165,22 +179,30 @@ subplot(1,2,1);
 h1 = imagesc(data3D(:,:,slice_idx));
 colormap invgray;
 axis equal;
-title(sprintf('Original data with line (slice %d/%d)', slice_idx, size(data3D,3)));
 hold on;
 h_line = plot([pointA(2), pointB(2)], [pointA(1), pointB(1)], 'r-', 'LineWidth', 2);
+if ~naked
+    title(sprintf('Original data with line (slice %d/%d)', slice_idx, size(data3D,3)));
+else
+    axis off;
+end
 
 % Second subplot: Rotational slice data
 subplot(1,2,2);
 h2 = imagesc(data2D(:,:,1)');
 colormap invgray;
-title(sprintf('Angle: %.2f° (0° = vertical)', rad2deg(angles(1))));
-xlabel('Position along line');
-ylabel('Energy slice');
 set(gca, 'YDir', 'normal'); % Make slice 1 appear at bottom
-colorbar;
 hold on;
 h_slice_line = yline(slice_idx, 'r-', 'LineWidth', 1.5);
 hold off;
+if ~naked
+    title(sprintf('Angle: %.2f° (0° = vertical)', rad2deg(angles(1))));
+    xlabel('Position along line');
+    ylabel('Energy slice');
+    colorbar;
+else
+    axis off;
+end
 
 % Store data in figure for callback
 setappdata(fig, 'data2D', data2D);
@@ -194,33 +216,45 @@ setappdata(fig, 'h_line', h_line);
 setappdata(fig, 'h_slice_line', h_slice_line);
 setappdata(fig, 'line_width', line_width);
 setappdata(fig, 'slice_idx', slice_idx);
+setappdata(fig, 'naked', naked);
+setappdata(fig, 'energy_axis', energy_axis);
+setappdata(fig, 'energy_unit', energy_unit);
 
-% Add slider for angle selection
+% Keep basic slider functionality available in both normal and naked modes
 slider = uicontrol('Style', 'slider',...
     'Min', 1, 'Max', length(angles),...
     'Value', 1,...
     'Position', [20 20 400 20],...
     'Callback', @updatePlot);
 
-% Add text showing current angle
-angle_text = uicontrol('Style', 'text',...
-    'Position', [430 20 100 20],...
-    'String', sprintf('%.2f°', rad2deg(angles(1))));
-setappdata(fig, 'angle_text', angle_text);
-
-% Add slider for slice selection (embedded d3grid-like browsing on subplot 1)
 slice_slider = uicontrol('Style', 'slider',...
     'Min', 1, 'Max', size(data3D,3),...
     'Value', slice_idx,...
     'SliderStep', [1/max(1,size(data3D,3)-1), min(10/max(1,size(data3D,3)-1),1)],...
     'Position', [560 20 400 20],...
     'Callback', @updateSlice);
+setappdata(fig, 'slice_slider', slice_slider);
 
+% Keep angle indicator visible in both normal and naked modes
+angle_text = uicontrol('Style', 'text',...
+    'Position', [430 20 100 20],...
+    'String', sprintf('%.2f°', rad2deg(angles(1))));
+% Keep slice indicator visible in both normal and naked modes
 slice_text = uicontrol('Style', 'text',...
     'Position', [970 20 160 20],...
     'String', sprintf('Slice %d/%d', slice_idx, size(data3D,3)));
-setappdata(fig, 'slice_slider', slice_slider);
+energy_text = uicontrol('Style', 'text',...
+    'Position', [970 0 160 20],...
+    'String', sprintf('Energy: %.1f %s', energy_axis(slice_idx), energy_unit));
+line_toggle = uicontrol('Style', 'togglebutton',...
+    'Position', [970 45 160 24],...
+    'String', 'Lines: On',...
+    'Value', 1,...
+    'Callback', @toggleLines);
+setappdata(fig, 'angle_text', angle_text);
 setappdata(fig, 'slice_text', slice_text);
+setappdata(fig, 'energy_text', energy_text);
+setappdata(fig, 'line_toggle', line_toggle);
 
 end
 
@@ -238,6 +272,7 @@ function updatePlot(src, ~)
     h_line = getappdata(fig, 'h_line');
     angle_text = getappdata(fig, 'angle_text');
     line_width = getappdata(fig, 'line_width');
+    naked = getappdata(fig, 'naked');
     
     % Get current angle index
     idx = round(src.Value);
@@ -257,10 +292,14 @@ function updatePlot(src, ~)
     
     % Update second subplot
     h2.CData = data2D(:,:,idx)';
-    title(sprintf('Angle: %.2f° (0° = vertical)', rad2deg(angles(idx))));
+    if ~naked
+        title(sprintf('Angle: %.2f° (0° = vertical)', rad2deg(angles(idx))));
+    end
     
     % Update angle text
-    set(angle_text, 'String', sprintf('%.2f°', rad2deg(angles(idx))));
+    if ~isempty(angle_text) && isgraphics(angle_text)
+        set(angle_text, 'String', sprintf('%.2f°', rad2deg(angles(idx))));
+    end
 end 
 
 % Callback function to update displayed slice and horizontal marker
@@ -271,6 +310,10 @@ function updateSlice(src, ~)
     h_slice_line = getappdata(fig, 'h_slice_line');
     h_line = getappdata(fig, 'h_line');
     slice_text = getappdata(fig, 'slice_text');
+    energy_text = getappdata(fig, 'energy_text');
+    energy_axis = getappdata(fig, 'energy_axis');
+    energy_unit = getappdata(fig, 'energy_unit');
+    naked = getappdata(fig, 'naked');
 
     idx = round(src.Value);
     idx = max(1, min(size(data3D,3), idx));
@@ -282,12 +325,46 @@ function updateSlice(src, ~)
     % Keep overlay line and update title
     ax1 = ancestor(h1, 'axes');
     axes(ax1); %#ok<LAXES>
-    title(ax1, sprintf('Original data with line (slice %d/%d)', idx, size(data3D,3)));
+    if ~naked
+        title(ax1, sprintf('Original data with line (slice %d/%d)', idx, size(data3D,3)));
+    end
     uistack(h_line, 'top');
 
     % Update subplot 2 horizontal line to corresponding y-position
-    h_slice_line.Value = idx;
+    if ~isempty(h_slice_line) && isgraphics(h_slice_line)
+        h_slice_line.Value = idx;
+    end
 
     % Update slice text readout
-    set(slice_text, 'String', sprintf('Slice %d/%d', idx, size(data3D,3)));
+    if ~isempty(slice_text) && isgraphics(slice_text)
+        set(slice_text, 'String', sprintf('Slice %d/%d', idx, size(data3D,3)));
+    end
+    if ~isempty(energy_text) && isgraphics(energy_text)
+        set(energy_text, 'String', sprintf('Energy: %.1f %s', energy_axis(idx), energy_unit));
+    end
+end
+
+% Callback to toggle visibility of red line indicators
+function toggleLines(src, ~)
+    fig = ancestor(src, 'figure');
+    h_line = getappdata(fig, 'h_line');
+    h_slice_line = getappdata(fig, 'h_slice_line');
+
+    if src.Value == 1
+        if isgraphics(h_line)
+            h_line.Visible = 'on';
+        end
+        if isgraphics(h_slice_line)
+            h_slice_line.Visible = 'on';
+        end
+        src.String = 'Lines: On';
+    else
+        if isgraphics(h_line)
+            h_line.Visible = 'off';
+        end
+        if isgraphics(h_slice_line)
+            h_slice_line.Visible = 'off';
+        end
+        src.String = 'Lines: Off';
+    end
 end

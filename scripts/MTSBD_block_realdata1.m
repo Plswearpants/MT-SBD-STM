@@ -1,10 +1,10 @@
-%% Block 0: Centralized run configuration
+%% Centralized run configuration
 cfg = init_config();
 
 %% Before Run Standardize
 rangetype ='dynamic';
 
-%% 4_pre Pick reference slice
+%% Pick reference slice
 figure;
 d3gridDisplay(Y,rangetype);
 params.ref_slice = input('Enter reference slice number: ');
@@ -71,7 +71,6 @@ for k = 1:num_kernels
         fprintf('[kernel flip] reference kernel %d flipped\n', k);
     end
 end
-%%
 figure;
 for k = 1:num_kernels
     subplot(1,num_kernels,k);
@@ -80,14 +79,14 @@ for k = 1:num_kernels
     axis square;
 end
 
-%% (ESS)noise level determination 
+%% Noise level determination 
 eta_data = estimate_noise(Y_ref, 'std');  
 
-%% (Opt) determine SNR (retire)
+%% (Opt) determine SNR
 SNR_data= var(A1_ref{1}(:))/eta_data;
 fprintf('SNR_data = %d', SNR_data);
 
-%% Block 4: Find Optimal Activation for Reference Slice
+%% Find Optimal Activation for Reference Slice
 % Set up display functions
 figure;
 dispfun = cell(1,  num_kernels);
@@ -97,7 +96,7 @@ end
 
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 3;
+outerloop_maxIT= 2;
 %params_ref.energy = energy_selected(params.ref_slice);
 params_ref.lambda1 = [0.02, 0.02, 0.02, 0.02, 0.02];  % regularization parameter for Phase I
 params_ref.phase2 = false;
@@ -125,93 +124,7 @@ params_ref.noise_var = eta_data;
 %% Visualize Reference result 
 [Y_rec,Y_rec_all] = visualizeRealResult(Y_ref,A_ref, X_ref, b_ref, extras_ref);
 
-%% compare the Xout vs X manual (retire)
-X0=zeros([size(Y_ref,1),size(Y_ref,2),length(defect_loc)]);
-for i =1:length(defect_loc)
-    X0(:,:,i)=locationsToMask(defect_loc{i},[size(Y_ref,1),size(Y_ref,2)]);
-end 
-
-[X_ref_aligned, ~, ~] = alignActivationMaps(X0, X_ref, kernel_sizes);
-[X_similarity, ~] = computeActivationSimilarity(X0, X_ref_aligned, kernel_sizes,1);
-
-%% Pad the A_ref to be size defined by user, normalize and use them as the A1 (retire)
-target_size = cfg.sliceRunPadded.target_size;
-kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
-%kernel_sizes_pad = [[120,120];[120,120];[65,65]];
-A_pre_pad = A_ref;
-A1_ref = cell(1, num_kernels);
-for k = 1:num_kernels
-    sz = size(A_pre_pad{k});
-    pad_h = kernel_sizes_pad(k,1) - sz(1);
-    pad_w = kernel_sizes_pad(k,2) - sz(2);
-
-    % Calculate pre- and post-padding for centering
-    pre_h = floor(pad_h / 2);
-    post_h = ceil(pad_h / 2);
-    pre_w = floor(pad_w / 2);
-    post_w = ceil(pad_w / 2);
-
-    % Pad so that the kernel is centered
-    A1_ref{k} = padarray(A_pre_pad{k}, [pre_h, pre_w], 'pre');
-    A1_ref{k} = padarray(A1_ref{k}, [post_h, post_w], 'post');
-    
-    A1_ref{k} = proj2oblique(A1_ref{k});
-end
-
-% visualize the padded kernels
-figure;
-for k = 1:num_kernels
-    subplot(1,num_kernels,k);
-    imagesc(A1_ref{k}); axis square;
-    colorbar;
-end
-
-% define the intial activation map using X_ref
-for k = 1:num_kernels
-    params_ref.xinit{k}.X = X_ref(:,:,k);
-    params_ref.xinit{k}.b = extras_ref.phase1.biter(k); 
-end
-%% Set ups before padded run (retire)
-% Set up display functions
-figure;
-dispfun = cell(1, num_kernels);
-for n = 1:num_kernels
-    dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_ref, A1_ref{n}, X, A, X, kernel_sizes, kplus, 1);
-end
-
-% SBD settings.
-miniloop_iteration = cfg.sliceRunPadded.miniloop_iteration;
-outerloop_maxIT= cfg.sliceRunPadded.outerloop_maxIT;
-
-params_ref.lambda1 = cfg.sliceRunPadded.lambda1;  % regularization parameter for Phase I
-%params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
-params_ref.phase2 = cfg.sliceRunPadded.phase2;
-params_ref.kplus = ceil(cfg.sliceRunPadded.kplus_factor * kernel_sizes);
-params_ref.lambda2 = cfg.sliceRunPadded.lambda2;  % FINAL reg. param. value for Phase II
-params_ref.nrefine = cfg.sliceRunPadded.nrefine;
-params_ref.signflip = cfg.sliceRunPadded.signflip;
-params_ref.xpos = cfg.sliceRunPadded.xpos;
-params_ref.getbias = cfg.sliceRunPadded.getbias;
-params_ref.Xsolve = cfg.sliceRunPadded.Xsolve;
-
-% noise variance for computeResidualQuality.m
-params_ref.noise_var = eta_data;
-%% Run the padded initialization (retire)
-% 2. The fun part
-[A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad] = MT_SBD(Y_ref, kernel_sizes_pad, params_ref, dispfun, A1_ref, miniloop_iteration, outerloop_maxIT);
-%% Visualize Padded result (retire)
-visualizeRealResult(Y_ref,A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad);
-%% Reconstructed Y (retire) 
-Y_rec_pad = zeros([size(Y_ref),num_kernels]);
-for k = 1:num_kernels
-    Y_rec_pad(:,:,k) = convfft2(A_ref_pad{1,k}, X_ref_pad(:,:,k)) + b_ref_pad(k);
-end
-%% Save the padded ones (retire) 
-padfilename = sprintf('MTSBD_LiFeAs_%f meV.mat',1000*params_ref.energy);
-%save(padfilename,'Y_ref','A_ref_pad', 'X_ref_pad', 'b_ref_pad', 'extras_ref_pad', 'params_ref');
-save(padfilename,'Y_ref','A_ref', 'X_ref', 'b_ref', 'extras_ref', 'params_ref');
-
-%% Block 3: Find Most Isolated Points and Initialize Kernels (retire the most isolated points logic)
+%% Find Most Isolated Points and Initialize ALL Kernels (retire the most isolated points logic)
 num_slices = size(Y,3);
 
 % Choose method for kernel center selection
@@ -494,20 +407,6 @@ for k = 1:num_kernels
 end
 
 eta_data3d = estimate_noise3D(Y, 'std');  
-%% Insert previous results (retire)
-
-for i = 1:5
-    % adjust the inplane shift
-    A1_all_matrix{i} = inplaneShift(A1_all_matrix{i},[41,41],[40,41]);
-    A1_all_matrix{i}(:,:,80:130)=Aout_ALL{i};
-end
-
-%% (retire)
-for i = 1:5
-    % adjust the inplane shift
-    A1_all_matrix{i} = A1_all_matrix{i}(:,:,70:90);
-end
-
 
 %% Orchastrate the truncation slices run 
 
@@ -515,8 +414,8 @@ end
 % Examples:
 %   run_slice_idx = 1:80;
 %   run_kernel_idx = [1,2,5];
-run_slice_idx = 64;
-run_kernel_idx = [1,2,5];
+run_slice_idx = 100:200;
+run_kernel_idx = [1,2,3,4];
 
 % Validate requested truncation indices.
 if isempty(run_slice_idx) || any(run_slice_idx < 1) || any(run_slice_idx > size(Y,3))
@@ -601,9 +500,9 @@ end
 %% Run for all_slice
 % SBD settings.
 miniloop_iteration = 1;
-outerloop_maxIT= 3;
+outerloop_maxIT= 5;
 
-lambda1_base_full = [0.02, 0.018, 0.02, 0.02, 0.02];
+lambda1_base_full = [0.020, 0.02, 0.02, 0.02, 0.018];
 if numel(lambda1_base_full) < max(run_kernel_idx)
     error('lambda1_base_full must cover all selected kernel indices.');
 end
@@ -705,13 +604,6 @@ for s = 1:num_slices
     end
 end
 
-%% Visualize Reference result (retire)
-for i = 40: 41
-    pp=struct();
-    pp.phase1.residuals = ALL_extras.phase1.residuals(:,:,i,:);
-    pp.phase1.quality_metrics = ALL_extras.phase1.quality_metrics;
-    visualizeRealResult(Y_used(:,:,i), Aout_ALL_cell(i,:), Xout_ALL, bout_ALL(i,:), pp);
-end 
 %% Kernels movies 
 for k = 1:length(Aout_ALL)
     figure;
@@ -737,8 +629,8 @@ for i = 1:size(Y_used,3)
         Y_rec(:,:,i) = Y_rec(:,:,i) + convfft2(Aout_ALL_cell{i,k}, Xout_ALL(:,:,k)) + bout_ALL(i,k);
     end
 end
-figure;
-d3gridDisplay(Y_rec, 'dynamic')
+%figure;
+%d3gridDisplay(Y_rec, 'dynamic')
 
 %% Create reconstruction for initialized all slices
 Y_init = zeros(size(Y_used));
@@ -794,7 +686,7 @@ for i = 1:size(Y_rec_show_Full,3)
 end
 
 % Combine normalized reconstructions and their FT-QPI
-Y_rec_ALL_show_norm = [Y_rec_show_Full; qpi_Y_rec_show_Full];
+%Y_rec_ALL_show_norm = [Y_rec_show_Full; qpi_Y_rec_show_Full];
 
 %% Display the normalized and combined results
 figure;
@@ -817,37 +709,124 @@ end
 % Combine normalized reconstructions and their FT-QPI
 Y_show_norm = [Y_full_visualize; qpi_Y_full_visualize];
 
-%% Display the Y_show_norm (retire)
-figure;
-d3gridDisplay(Y_show_norm, 'dynamic');
-title('ALL combined');
+%% write the video 
+gridVideoWriter(rot90(Y_show_norm), V, 'dynamic', 100, 'invgray', 0, [800 800]);
 
-%%  (retire)
-Aout_show = [];
-for i = 1: size(Aout_ALL,1)
-    Aout_show = [Aout_show,mat2gray(Aout_ALL{i})];
+% delay unit? 
+%% QPI movies 
+for k = 1:length(Aout_ALL)
+    figure;
+    d3gridDisplay(qpiCalculate(Aout_ALL{k}), 'dynamic')
 end
 
-figure;
-d3gridDisplay(Aout_show, 'dynamic')
+%% ~~~~~~~~~~~~~~~~~~~~~~~~~~Retired Blocks~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+%% compare the Xout vs X manual (retire)
+X0=zeros([size(Y_ref,1),size(Y_ref,2),length(defect_loc)]);
+for i =1:length(defect_loc)
+    X0(:,:,i)=locationsToMask(defect_loc{i},[size(Y_ref,1),size(Y_ref,2)]);
+end 
 
-%%  (retire)
-qpi_show = [];
-for i = 1: size(Aout_ALL,1)
-    qpi_show = [qpi_show,mat2gray(qpiCalculate(Aout_ALL{i}),[0,1])];
+[X_ref_aligned, ~, ~] = alignActivationMaps(X0, X_ref, kernel_sizes);
+[X_similarity, ~] = computeActivationSimilarity(X0, X_ref_aligned, kernel_sizes,1);
+
+%% Pad the A_ref to be size defined by user, normalize and use them as the A1 (retire)
+target_size = cfg.sliceRunPadded.target_size;
+kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
+%kernel_sizes_pad = [[120,120];[120,120];[65,65]];
+A_pre_pad = A_ref;
+A1_ref = cell(1, num_kernels);
+for k = 1:num_kernels
+    sz = size(A_pre_pad{k});
+    pad_h = kernel_sizes_pad(k,1) - sz(1);
+    pad_w = kernel_sizes_pad(k,2) - sz(2);
+
+    % Calculate pre- and post-padding for centering
+    pre_h = floor(pad_h / 2);
+    post_h = ceil(pad_h / 2);
+    pre_w = floor(pad_w / 2);
+    post_w = ceil(pad_w / 2);
+
+    % Pad so that the kernel is centered
+    A1_ref{k} = padarray(A_pre_pad{k}, [pre_h, pre_w], 'pre');
+    A1_ref{k} = padarray(A1_ref{k}, [post_h, post_w], 'post');
+    
+    A1_ref{k} = proj2oblique(A1_ref{k});
 end
 
+% visualize the padded kernels
 figure;
-d3gridDisplay(qpi_show, 'dynamic')
+for k = 1:num_kernels
+    subplot(1,num_kernels,k);
+    imagesc(A1_ref{k}); axis square;
+    colorbar;
+end
 
-%% Merge 3 ZrSiTe runs (retire) 
-Aout_Full_energy = cell(2,1);
-Aout_Full_energy{1,1}=C;
-Aout_Full_energy{2,1}=D;
+% define the intial activation map using X_ref
+for k = 1:num_kernels
+    params_ref.xinit{k}.X = X_ref(:,:,k);
+    params_ref.xinit{k}.b = extras_ref.phase1.biter(k); 
+end
+%% Set ups before padded run (retire)
+% Set up display functions
+figure;
+dispfun = cell(1, num_kernels);
+for n = 1:num_kernels
+    dispfun{n} = @(Y, A, X, kernel_sizes, kplus) showims(Y_ref, A1_ref{n}, X, A, X, kernel_sizes, kplus, 1);
+end
 
-%%
-save('ZrSiTe_kernel1&2_FULL_[80,80].mat', 'Y_used','Aout_Full_energy', 'Xout_A1', 'Xout_A2');
+% SBD settings.
+miniloop_iteration = cfg.sliceRunPadded.miniloop_iteration;
+outerloop_maxIT= cfg.sliceRunPadded.outerloop_maxIT;
 
+params_ref.lambda1 = cfg.sliceRunPadded.lambda1;  % regularization parameter for Phase I
+%params_ref.lambda1 = [0.15, 0.15, 0.15, 0.15, 0.15];  % regularization parameter for Phase I
+params_ref.phase2 = cfg.sliceRunPadded.phase2;
+params_ref.kplus = ceil(cfg.sliceRunPadded.kplus_factor * kernel_sizes);
+params_ref.lambda2 = cfg.sliceRunPadded.lambda2;  % FINAL reg. param. value for Phase II
+params_ref.nrefine = cfg.sliceRunPadded.nrefine;
+params_ref.signflip = cfg.sliceRunPadded.signflip;
+params_ref.xpos = cfg.sliceRunPadded.xpos;
+params_ref.getbias = cfg.sliceRunPadded.getbias;
+params_ref.Xsolve = cfg.sliceRunPadded.Xsolve;
+
+% noise variance for computeResidualQuality.m
+params_ref.noise_var = eta_data;
+%% Run the padded initialization (retire)
+% 2. The fun part
+[A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad] = MT_SBD(Y_ref, kernel_sizes_pad, params_ref, dispfun, A1_ref, miniloop_iteration, outerloop_maxIT);
+%% Visualize Padded result (retire)
+visualizeRealResult(Y_ref,A_ref_pad, X_ref_pad, b_ref_pad, extras_ref_pad);
+%% Reconstructed Y (retire) 
+Y_rec_pad = zeros([size(Y_ref),num_kernels]);
+for k = 1:num_kernels
+    Y_rec_pad(:,:,k) = convfft2(A_ref_pad{1,k}, X_ref_pad(:,:,k)) + b_ref_pad(k);
+end
+%% Save the padded ones (retire) 
+padfilename = sprintf('MTSBD_LiFeAs_%f meV.mat',1000*params_ref.energy);
+%save(padfilename,'Y_ref','A_ref_pad', 'X_ref_pad', 'b_ref_pad', 'extras_ref_pad', 'params_ref');
+save(padfilename,'Y_ref','A_ref', 'X_ref', 'b_ref', 'extras_ref', 'params_ref');
+
+%% Insert previous results (retire)
+
+for i = 1:5
+    % adjust the inplane shift
+    A1_all_matrix{i} = inplaneShift(A1_all_matrix{i},[41,41],[40,41]);
+    A1_all_matrix{i}(:,:,80:130)=Aout_ALL{i};
+end
+
+%% (retire)
+for i = 1:5
+    % adjust the inplane shift
+    A1_all_matrix{i} = A1_all_matrix{i}(:,:,70:90);
+end
+
+%% Visualize Reference result (retire)
+for i = 40: 41
+    pp=struct();
+    pp.phase1.residuals = ALL_extras.phase1.residuals(:,:,i,:);
+    pp.phase1.quality_metrics = ALL_extras.phase1.quality_metrics;
+    visualizeRealResult(Y_used(:,:,i), Aout_ALL_cell(i,:), Xout_ALL, bout_ALL(i,:), pp);
+end 
 %% Show FULL&QPI&QPI_padded (retire)
 Aout_show_Full = [];
 for i = 1: size(Aout_Full_energy,1)
@@ -886,15 +865,6 @@ ALL_show_norm = [Aout_show_norm;qpi_show_norm];
 figure; 
 d3gridDisplay(ALL_show_norm, 'dynamic');
 
-%% write the video 
-gridVideoWriter(rot90(Y_show_norm), V, 'dynamic', 100, 'invgray', 0, [800 800]);
-
-% delay unit? 
-%% QPI movies 
-for k = 1:length(Aout_ALL)
-    figure;
-    d3gridDisplay(qpiCalculate(Aout_ALL{k}), 'dynamic')
-end
 %% Pad the output kernels to target sizes (retire)
 target_size = [110, 110];  % Same target size as used for reference kernels
 kernel_sizes_pad = repmat(target_size,[num_kernels,1]);
@@ -1159,6 +1129,36 @@ for k = 1:num_kernels
 end
 
 fprintf('\nSequential processing complete!\n');
+
+%% Display the Y_show_norm (retire)
+figure;
+d3gridDisplay(Y_show_norm(), 'dynamic');
+title('ALL combined');
+
+%%  (retire)
+Aout_show = [];
+for i = 1: size(Aout_ALL,1)
+    Aout_show = [Aout_show,mat2gray(Aout_ALL{i})];
+end
+
+figure;
+d3gridDisplay(Aout_show, 'dynamic')
+
+%%  (retire)
+qpi_show = [];
+for i = 1: size(Aout_ALL,1)
+    qpi_show = [qpi_show,mat2gray(qpiCalculate(Aout_ALL{i}),[0,1])];
+end
+
+figure;
+d3gridDisplay(qpi_show, 'dynamic')
+
+%% Merge 3 ZrSiTe runs (retire) 
+Aout_Full_energy = cell(2,1);
+Aout_Full_energy{1,1}=C;
+Aout_Full_energy{2,1}=D;
+save('ZrSiTe_kernel1&2_FULL_[80,80].mat', 'Y_used','Aout_Full_energy', 'Xout_A1', 'Xout_A2');
+
 
 %% Visualize sequential results (retire)
 fprintf('\n=== VISUALIZING SEQUENTIAL RESULTS ===\n');
