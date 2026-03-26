@@ -3,7 +3,7 @@
 metrics= loadMetricDataset_new();
 
 %% create heatspace
-metrics2heat_properGen(metrics);
+metrics2heat_properGen(metrics,2);
 
 %% fixed density vis
 % For kernel similarity
@@ -18,7 +18,7 @@ visualize_heatspace_details_properGen(metrics)
 
 %% number of defect occurrence vs kernel similarity
 plot_defects_snr_kernel_similarity(metrics);
-%%
+%% number of defect occurrence vs kernel similarity by SNR
 plot_defects_vs_kernel_similarity_by_snr(metrics);
 %% view combined set 
 % Load your 3 different experiment runs

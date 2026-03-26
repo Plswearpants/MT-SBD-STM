@@ -2,7 +2,7 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-syn_loc = 'results\synthetic_datasets\synthetic_datasets_20251108_114222.mat';
+syn_loc = 'results\synthetic_datasets\synthetic_datasets_20260325_121812.mat';
 load(syn_loc);  
 
 %% Initialize kernels for all datasets
