@@ -210,7 +210,7 @@ end
 %  using trusted-slice weights and reference-slice initializations. Writes a
 %  "run" checkpoint with kernels, activations, bias terms, and extras.
 %
-%  Dependencies: MTSBD_all_slice.m, MTSBD_Xregulated_all_slices.m,
+%  Dependencies: MTSBD_all_slice_modified.m, MTSBD_Xregulated_all_slices.m,
 %                build_auto_trusted_slice_weights.m,
 %                future wrapper runAllSlicesReal.m
 %

@@ -489,7 +489,7 @@ if use_trusted_weights
 end
 
 if ~use_trusted_weights
-    % Unweighted: allow MTSBD_all_slice to default slice_weights = ones
+    % Unweighted: allow MTSBD_all_slice_modified to default slice_weights = ones
     params.slice_weights = [];
     params.slice_weight_details = struct();
     params.slice_weight_details.trusted_counts = run_num_slices * ones(1, run_num_kernels);
@@ -530,7 +530,7 @@ params.kernel_update_order = 1:run_num_kernels;  % local order for selected kern
 
 use_custom_order = true;
 if use_custom_order
-    use_custom_order = input('Use custom kernel update order for MTSBD_all_slice? (0/1): ');
+    use_custom_order = input('Use custom kernel update order for MTSBD_all_slice_modified? (0/1): ');
 end
 if ~isempty(use_custom_order) && use_custom_order
     custom_order = input(sprintf('Enter kernel update permutation of 1:%d (e.g. [2 1 3 ...]): ', run_num_kernels));
@@ -947,7 +947,7 @@ if params.use_Xregulated
     [REG_Aout_ALL, REG_Xout_ALL, REG_bout_ALL, REG_extras_ALL] = MTSBD_Xregulated_all_slices(...
         Y_used, kernel_sizes_pad, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
 else
-    [Aout_ALL, Xout_ALL, bout_ALL, ALL_extras] = MTSBD_all_slice(...
+    [Aout_ALL, Xout_ALL, bout_ALL, ALL_extras] = MTSBD_all_slice_modified(...
         Y_used, kernel_sizes_pad, params, dispfun, A1_used, miniloop_iteration, outerloop_maxIT);
 end
 
