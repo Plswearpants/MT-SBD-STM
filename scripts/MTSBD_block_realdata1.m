@@ -217,9 +217,10 @@ window_type = {'gaussian', 2.5};
 
 if same_size
     %[square_size] = squareDrawSize(Y_ref);
-    square_size=[80,80];
+    square_size=[42,42];
     kernel_sizes = repmat(square_size,[num_kernels,1]);
-    A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
+    % Initialize cropped kernels first, then apply windowing below.
+    A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, '');
 else
     A1_ref = cell(1, num_kernels);
     kernel_sizes = zeros(num_kernels, 2); % Store sizes of each kernel [height, width]
@@ -228,26 +229,43 @@ else
         [square_size,position, mask] = squareDrawSize(Y_ref);           	% determine kernel size
         [A1_ref{k}, ~] = gridCropMask(Y_ref, mask);   % the cropped real data as kernel
         % Need to put each slice back onto the sphere
-        A1_ref{k} = proj2oblique(A1_ref{k});
+        %A1_ref{k} = proj2oblique(A1_ref{k});
         % Store the kernel size
         kernel_sizes(k,:) = size(A1_ref{k});
     end
 end
-%%
-figure;
-for k = 1:num_kernels
-    subplot(1,num_kernels,k);
-    imagesc(A1_ref{k});
-    colorbar;
-    axis square;
+
+% Reserve cropped kernels before applying any window.
+A1_cropped = A1_ref;
+
+for n = 1:num_kernels
+    A1_ref{n} = proj2oblique(A1_ref{n});
 end
 
-%% (ESS)noise level determination 
+% Apply window to initialized kernels (if requested).
+if ~isempty(window_type)
+    for k = 1:num_kernels
+        if iscell(window_type)
+            A1_ref{k} = windowToKernel(A1_ref{k}, window_type{1}, window_type{2});
+        else
+            A1_ref{k} = windowToKernel(A1_ref{k}, window_type);
+        end
+    end
+end
+
+
+%% Determine the SNR of the slice
+
+%  Interactive inspection tool: pick one peak-to-valley amplitude(for more rigirous definition, see prominence in findpeaks function) per kernel.
+peak_to_valley_amplitudes = pickPeakToValleyAllKernels(A1_cropped);
+disp('Peak-to-valley amplitudes (1 x num_kernels):');
+disp(peak_to_valley_amplitudes);
+
+% background noise determination
 eta_data = estimate_noise(Y_ref, 'std');  
 
-%% (Opt) determine SNR
-SNR_data= var(A1{1,1}(:))/eta_data;
-fprintf('SNR_data = %d', SNR_data);
+SNR_data= mean(peak_to_valley_amplitudes)/sqrt(eta_data);
+fprintf('SNR_data = %.2f\n', SNR_data);
 
 %% Block 4: Find Optimal Activation for Reference Slice
 % Set up display functions
@@ -1304,6 +1322,228 @@ fprintf('Best Reconstruction Quality: %.4f (at %.1f meV)\n', max(reconstruction_
 fprintf('Worst Reconstruction Quality: %.4f (at %.1f meV)\n', min(reconstruction_quality), energy_selected(reconstruction_quality == min(reconstruction_quality)) * 1000);
 
 fprintf('\nSequential results visualization complete!\n');
+
+function amp_peak_to_valley = interactiveLineProfileA1Cropped(A1_cropped, kernel_idx)
+%INTERACTIVELINEPROFILEA1CROPPED Interactive line profile explorer.
+% Left: cropped kernel with centered red line + midpoint.
+% Right: line profile sampled along the line.
+
+    amp_peak_to_valley = NaN;
+
+    if nargin < 2 || isempty(kernel_idx)
+        kernel_idx = 1;
+    end
+
+    % Support both cell-array kernels and a single matrix input.
+    if iscell(A1_cropped)
+        if kernel_idx < 1 || kernel_idx > numel(A1_cropped)
+            error('kernel_idx out of range for A1_cropped.');
+        end
+        img = A1_cropped{kernel_idx};
+    else
+        img = A1_cropped;
+    end
+
+    if isempty(img) || ndims(img) ~= 2
+        error('A1_cropped must be a non-empty 2D kernel image.');
+    end
+
+    [h, w] = size(img);
+    center = [(w + 1) / 2, (h + 1) / 2]; % [x, y]
+    half_len = 0.4 * min(h, w);          % initial half length
+    angle_deg = 0;                        % horizontal initial line
+    current_profile = [];
+    current_x = [];
+
+    f = figure('Name', sprintf('A1\\_cropped Line Profile (Kernel %d)', kernel_idx), ...
+               'NumberTitle', 'off', 'Color', 'w', ...
+               'CloseRequestFcn', @onFigureClose);
+
+    ax_img = subplot(1,2,1, 'Parent', f);
+    imagesc(ax_img, img);
+    axis(ax_img, 'image');
+    colormap(ax_img, gray);
+    colorbar(ax_img);
+    title(ax_img, 'A1\_cropped with draggable angle line');
+    hold(ax_img, 'on');
+
+    % Draw centered line and midpoint marker.
+    [p1, p2] = endpointsFromCenter(center, half_len, angle_deg);
+    h_line = drawline(ax_img, 'Position', [p1; p2], 'Color', 'r', 'LineWidth', 1.5);
+    h_mid = plot(ax_img, center(1), center(2), 'r.', 'MarkerSize', 20); %#ok<NASGU>
+
+    ax_prof = subplot(1,2,2, 'Parent', f);
+    h_prof = plot(ax_prof, nan, nan, 'b-', 'LineWidth', 1.5);
+    grid(ax_prof, 'on');
+    xlabel(ax_prof, 'Sample index along line');
+    ylabel(ax_prof, 'Intensity');
+    title(ax_prof, 'Line profile');
+
+    h_pick = uicontrol('Parent', f, 'Style', 'pushbutton', 'Units', 'normalized', ...
+                       'Position', [0.58, 0.02, 0.22, 0.05], ...
+                       'String', 'Pick Peak to Valley', ...
+                       'Callback', @onPickPeakToValley);
+    h_angle_text = uicontrol('Parent', f, 'Style', 'text', 'Units', 'normalized', ...
+                             'Position', [0.82, 0.02, 0.16, 0.04], ...
+                             'String', 'Angle: 0.0 deg', ...
+                             'BackgroundColor', 'w', 'HorizontalAlignment', 'left');
+
+    % Keep midpoint pinned during drag and update profile when drag stops.
+    is_adjusting_line = false;
+    addlistener(h_line, 'MovingROI', @onLineMoving);
+    addlistener(h_line, 'ROIMoved', @onLineMoved);
+    updateProfile();
+    uiwait(f);
+
+    function onLineMoved(~, ~)
+        % Keep midpoint fixed at image center; only angle/length can change.
+        pos = h_line.Position;
+        v = pos(2,:) - pos(1,:); % [dx, dy]
+        if norm(v) < eps
+            return;
+        end
+        angle_deg = atan2d(v(2), v(1));
+        half_len = max(2, 0.5 * norm(v));
+        [q1, q2] = endpointsFromCenter(center, half_len, angle_deg);
+        h_line.Position = [q1; q2];
+        set(h_angle_text, 'String', sprintf('Angle: %.1f deg', angle_deg));
+        updateProfile();
+    end
+
+    function onPickPeakToValley(~, ~)
+        if isempty(current_profile)
+            return;
+        end
+
+        PeakSig = current_profile(:).';
+        x = current_x(:).';
+
+        cla(ax_prof);
+        plot(ax_prof, x, PeakSig, 'b-', 'LineWidth', 1.5);
+        grid(ax_prof, 'on');
+        hold(ax_prof, 'on');
+
+        [pks, locs, ~, proms] = findpeaks(PeakSig, x, ...
+            'Annotate', 'extents', ...
+            'WidthReference', 'halfheight', ...
+            'SortStr', 'descend', ...
+            'NPeaks', 4);
+
+        if isempty(pks)
+            title(ax_prof, 'Line profile (no peaks found)');
+            hold(ax_prof, 'off');
+            return;
+        end
+
+        hp = plot(ax_prof, locs, pks, 'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 6);
+        for i = 1:numel(pks)
+            text(ax_prof, locs(i), pks(i), sprintf('  #%d', i), 'Color', 'r', 'FontSize', 9, ...
+                'VerticalAlignment', 'bottom');
+        end
+        title(ax_prof, 'Click one of top-4 peaks to confirm');
+
+        [x_click, ~] = ginput(1);
+        [~, idx] = min(abs(locs - x_click));
+
+        % Use prominence as peak-to-valley amplitude.
+        amp_peak_to_valley = proms(idx);
+        peak_value = pks(idx);
+        peak_x = locs(idx);
+
+        set(hp, 'MarkerFaceColor', 'none');
+        plot(ax_prof, peak_x, peak_value, 'mo', 'MarkerFaceColor', 'm', 'MarkerSize', 8);
+        title(ax_prof, sprintf('Selected peak @ x=%.1f | peak=%.4g | peak-to-valley amp=%.4g', ...
+            peak_x, peak_value, amp_peak_to_valley));
+        hold(ax_prof, 'off');
+
+        fprintf('Selected peak x=%.4f, peak=%.6g, peak-to-valley amplitude(prominence)=%.6g\n', ...
+            peak_x, peak_value, amp_peak_to_valley);
+
+        if isvalid(f)
+            uiresume(f);
+            delete(f);
+        end
+    end
+
+    function onLineMoving(~, evt)
+        % Enforce a fixed midpoint continuously while dragging.
+        if is_adjusting_line
+            return;
+        end
+        is_adjusting_line = true;
+        pos = constrainLineToFixedCenter(evt.CurrentPosition);
+        h_line.Position = pos;
+        v = pos(2,:) - pos(1,:);
+        angle_deg = atan2d(v(2), v(1));
+        half_len = max(2, 0.5 * norm(v));
+        set(h_angle_text, 'String', sprintf('Angle: %.1f deg', angle_deg));
+        is_adjusting_line = false;
+    end
+
+    function pos_out = constrainLineToFixedCenter(pos_in)
+        % Remove translation and keep center fixed.
+        v = pos_in(2,:) - pos_in(1,:); % [dx, dy]
+        if norm(v) < eps
+            v = [2, 0];
+        end
+        ang = atan2d(v(2), v(1));
+        hlen = max(2, 0.5 * norm(v));
+        [c1, c2] = endpointsFromCenter(center, hlen, ang);
+        pos_out = [c1; c2];
+    end
+
+    function updateProfile()
+        pos = h_line.Position;
+        x = pos(:,1);
+        y = pos(:,2);
+        ns = max(2, round(norm(pos(2,:) - pos(1,:))) + 1);
+        prof = improfile(img, x, y, ns, 'bilinear');
+        prof = prof(:);
+        prof = prof(~isnan(prof));
+        if isempty(prof)
+            set(h_prof, 'XData', nan, 'YData', nan);
+            current_profile = [];
+            current_x = [];
+            return;
+        end
+
+        current_profile = prof(:).';
+        current_x = 1:numel(current_profile);
+
+        set(h_prof, 'XData', current_x, 'YData', current_profile);
+        xlim(ax_prof, [1, numel(current_profile)]);
+        ylim(ax_prof, [min(current_profile), max(current_profile)] + 1e-12 * [-1, 1]);
+    end
+
+    function onFigureClose(src, ~)
+        if strcmp(get(src, 'WaitStatus'), 'waiting')
+            uiresume(src);
+        end
+        delete(src);
+    end
+end
+
+function amp_list = pickPeakToValleyAllKernels(A1_cropped)
+%PICKPEAKTOVALLEYALLKERNELS Collect one selected amplitude per kernel.
+    if iscell(A1_cropped)
+        num_kernels = numel(A1_cropped);
+    else
+        num_kernels = 1;
+    end
+    amp_list = nan(1, num_kernels);
+    for k = 1:num_kernels
+        fprintf('\nKernel %d/%d: pick one peak-to-valley amplitude.\n', k, num_kernels);
+        amp_list(k) = interactiveLineProfileA1Cropped(A1_cropped, k);
+    end
+end
+
+function [p1, p2] = endpointsFromCenter(center, half_len, angle_deg)
+%ENDPOINTSFROMCENTER Build line endpoints from center, length and angle.
+    dx = half_len * cosd(angle_deg);
+    dy = half_len * sind(angle_deg);
+    p1 = [center(1) - dx, center(2) - dy];
+    p2 = [center(1) + dx, center(2) + dy];
+end
 
 function Xout_gaussian = Xout_gaussian_broaden(X_out, kernel_sizes)
 %XOUT_GAUSSIAN_BROADEN Apply Gaussian broadening to each channel of X_out based on kernel size.

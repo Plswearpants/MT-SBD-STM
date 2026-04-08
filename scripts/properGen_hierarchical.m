@@ -2,6 +2,7 @@
 % Load LDoS simulation data for kernel selection
 load('example_data/LDoS_multi_1_defects_20260325_105344.mat');
 LDoS_sim = LDoS_result;
+
 % Display the 3D LDoS data for selection
 fprintf('Displaying 3D LDoS simulation data...\n');
 figure;
@@ -14,19 +15,23 @@ input_str = input('', 's');
 sliceidx = str2num(input_str);
 num_kernels = length(sliceidx);
 
+% Mask selected slices at image center (single-defect case).
+% UI is only used to pick the masking radius per selected slice.
+LDoS_sim = apply_center_defect_mask_selected_slices(LDoS_sim, sliceidx);
+
 % Fixed parameters
 fixed_params.p_scale = 3;                       % Resolution factor
 fixed_params.N_single = N;                      % Input lattice size
 fixed_params.num_kernels = num_kernels;         % Number of kernels
 
 % Define parameter ranges for param_sets
-SNR_values = [0.5, 1, 3];                  % Different noise levels
-defect_density_values = [1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2];     % Different activation densities
+SNR_values = [1, 9];                  % Different noise levels
+defect_density_values = logspace(log10(1e-3), log10(1e-1), 15);     % activation densities with even multiplicative seperation (linear in log)
 rep = 3;  % Number of repetitions (random activation patterns) per (N_obs, rho_d) combination
 
 % Use side-length ratio as the generation handle and convert to N_obs upfront.
-% side_length_ratio = M / N_obs (1D length ratio).
-side_length_ratio_values = linspace(0.05,0.35,7);
+% side_length_ratio = kernel_side_pixels / observation_side_pixels = 2*M / N_obs.
+side_length_ratio_values = linspace(0.05,0.35,13);
 
 % Create handle-space parameter matrix
 [S, D, R] = meshgrid(SNR_values, defect_density_values, side_length_ratio_values);
@@ -46,7 +51,7 @@ end
 fprintf('Parameter space setup complete:\n');
 fprintf('- SNR values: %d points from %.2f to %.2f\n', length(SNR_values), min(SNR_values), max(SNR_values));
 fprintf('- Defect density values: %d points from %.2e to %.2e\n', length(defect_density_values), min(defect_density_values), max(defect_density_values));
-fprintf('- Side-length ratio values: %d points from %.3e to %.3e (M/N_obs)\n', ...
+fprintf('- Side-length ratio values: %d points from %.3e to %.3e (2M/N_obs)\n', ...
     length(side_length_ratio_values), min(side_length_ratio_values), max(side_length_ratio_values));
 fprintf('- Converted N_obs values: %d unique points from %d to %d\n', ...
     length(unique(param_sets(:,3))), min(param_sets(:,3)), max(param_sets(:,3)));
@@ -203,11 +208,14 @@ for i = 1:size(param_sets, 1)
     % Calculate M for this SNR
     M = get_max_cutoff_over_slices(LDoS_sim, sliceidx, SNR, fixed_params.N_single);
     
-    % Calculate side-length ratio after we have M and N_obs
-    side_length_ratio = M / N_obs;
+    % Recover the designed side-length ratio from the handle-space grid
+    designed_side_length_ratio = param_sets_handle(i, 3);
+    % Calculate actual side-length ratio after rounding N_obs
+    % (kernel-side / observation-side, pixel or lattice units are equivalent)
+    side_length_ratio = 2 * M / N_obs;
     
-    fprintf('Processing combination %d/%d: SNR=%.1f, rho_d=%.2e, N_obs=%d (side_length_ratio=%.2e)\n', ...
-        i, size(param_sets,1), SNR, rho_d, N_obs, side_length_ratio);
+    fprintf('Processing combination %d/%d: SNR=%.1f, rho_d=%.2e, N_obs=%d (designed_ratio=%.4f, actual_ratio=%.4f)\n', ...
+        i, size(param_sets,1), SNR, rho_d, N_obs, designed_side_length_ratio, side_length_ratio);
     
     % Find all base activations matching this (rho_d, N_obs) combination
     base_indices = find([base_activations.defect_density] == rho_d & [base_activations.N_obs] == N_obs);
@@ -236,11 +244,10 @@ for i = 1:size(param_sets, 1)
         % Add noise
         [Y, A0] = add_noise_to_dataset(Y_clean, A0_noiseless, SNR);
         
-        % Keep output schema unchanged: store ratio in existing area_ratio field
         final_datasets{dataset_counter} = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, randn, ...
-            rho_d, SNR, N_obs, side_length_ratio, repetition_idx);
-        descriptions{dataset_counter} = sprintf('SNR=%.1f, ρ_d=%.2e, N_obs=%d, rep=%d (side_length_ratio=%.2e)', ...
-            SNR, rho_d, N_obs, repetition_idx, side_length_ratio);
+            rho_d, SNR, N_obs, side_length_ratio, designed_side_length_ratio, repetition_idx);
+        descriptions{dataset_counter} = sprintf('SNR=%.1f, ρ_d=%.2e, N_obs=%d, rep=%d (designed_ratio=%.4f, actual_ratio=%.4f)', ...
+            SNR, rho_d, N_obs, repetition_idx, designed_side_length_ratio, side_length_ratio);
         dataset_counter = dataset_counter + 1;
     end
 end
@@ -263,8 +270,10 @@ if ~exist(save_dir, 'dir')
 end
 
 save_filename = fullfile(save_dir, sprintf('synthetic_datasets_%s.mat', timestamp));
+% Use -v7.3 (HDF5) so very large datasets (>2GB) can be saved.
 save(save_filename, 'datasets', 'descriptions', 'param_sets', ...
-    'fixed_params', 'sliceidx', 'LDoS_sim', 'ordering_info', 'rep');
+    'fixed_params', 'sliceidx', 'LDoS_sim', 'ordering_info', 'rep', ...
+    'side_length_ratio_values', '-v7.3');
 
 fprintf('\nDatasets saved to: %s\n', save_filename);
 fprintf('Saved %d datasets\n', numel(datasets));
@@ -439,16 +448,18 @@ function [Y, A0] = add_noise_to_dataset(Y_clean, A0_noiseless, SNR)
     % Add noise to clean observation and kernels
     % Initialize noisy kernels
     A0 = cell(size(A0_noiseless));
-    
-    % Calculate mean variance of kernels for noise level determination
-    kernel_variances = zeros(1, length(A0_noiseless));
-    for k = 1:length(A0_noiseless)
-        kernel_variances(k) = var(A0_noiseless{k}, [], 'all');
+
+    % Auto-estimate signal scale from center cuts (0 deg and 45 deg) per kernel.
+    % For each cut, use first peak prominence as peak-to-valley amplitude.
+    p2v_per_kernel = compute_p2v_centercuts_per_kernel(A0_noiseless);
+    mean_p2v = mean(p2v_per_kernel, 'omitnan');
+    if ~isfinite(mean_p2v) || mean_p2v <= 0
+        error('Failed to compute positive mean peak-to-valley amplitude from kernels.');
     end
-    mean_kernel_variance = mean(kernel_variances);
-    
-    % Calculate noise variance based on kernel variance
-    eta = mean_kernel_variance / SNR;
+
+    % Keep SNR convention aligned with real-data pipeline:
+    % SNR = mean_p2v / sqrt(eta)  =>  eta = (mean_p2v / SNR)^2
+    eta = (mean_p2v / SNR)^2;
     
     % Add noise to kernels
     for k = 1:length(A0_noiseless)
@@ -456,8 +467,80 @@ function [Y, A0] = add_noise_to_dataset(Y_clean, A0_noiseless, SNR)
         A0{k} = proj2oblique(A0{k});
     end
     
-    % Add noise to observation using the same eta based on kernel variance
+    % Add noise to observation using the same eta from p2v/SNR rule.
     Y = Y_clean + sqrt(eta) * randn(size(Y_clean));
+end
+
+function p2v_per_kernel = compute_p2v_centercuts_per_kernel(A0_noiseless)
+%COMPUTE_P2V_CENTERCUTS_PER_KERNEL Estimate p2v amplitude per kernel.
+%   For each kernel:
+%   - take horizontal (0 deg) and diagonal (45 deg) center cuts
+%   - for each cut, pick the highest-prominence peak
+%   - use that prominence as peak-to-valley amplitude
+%   - take max of the two cuts to get one p2v per kernel
+
+    num_kernels = numel(A0_noiseless);
+    p2v_per_kernel = nan(1, num_kernels);
+
+    for k = 1:num_kernels
+        Ak = A0_noiseless{k};
+        cut0 = center_cut_profile(Ak, 0);   % 0 deg center cut
+        cut45 = center_cut_profile(Ak, 45); % 45 deg center cut
+
+        p2v0 = first_peak_prominence(cut0);
+        p2v45 = first_peak_prominence(cut45);
+
+        p2v_per_kernel(k) = max([p2v0, p2v45], [], 'omitnan');
+    end
+end
+
+function prof = center_cut_profile(A, angle_deg)
+%CENTER_CUT_PROFILE Sample a center-passing line profile at given angle.
+    [h, w] = size(A);
+    cx = (w + 1) / 2;
+    cy = (h + 1) / 2;
+    dx = cosd(angle_deg);
+    dy = sind(angle_deg);
+
+    % Symmetric half-length that stays inside bounds for +/- direction.
+    lims = [];
+    if abs(dx) > eps
+        lims(end+1) = (w - cx) / abs(dx); %#ok<AGROW>
+        lims(end+1) = (cx - 1) / abs(dx); %#ok<AGROW>
+    end
+    if abs(dy) > eps
+        lims(end+1) = (h - cy) / abs(dy); %#ok<AGROW>
+        lims(end+1) = (cy - 1) / abs(dy); %#ok<AGROW>
+    end
+    half_len = max(1, min(lims));
+
+    x1 = cx - half_len * dx;
+    y1 = cy - half_len * dy;
+    x2 = cx + half_len * dx;
+    y2 = cy + half_len * dy;
+
+    ns = max(2, round(2 * half_len) + 1);
+    prof = improfile(A, [x1 x2], [y1 y2], ns, 'bilinear');
+    prof = double(prof(:)).';
+    prof = prof(~isnan(prof));
+end
+
+function p2v = first_peak_prominence(sig)
+%FIRST_PEAK_PROMINENCE Return maximum peak prominence.
+    sig = sig(:).';
+    x = 1:numel(sig);
+
+    [pks, ~, ~, proms] = findpeaks(sig, x, ...
+        'Annotate', 'extents', ...
+        'WidthReference', 'halfheight');
+
+    if isempty(pks)
+        % Fallback for monotonic/noisy edge cases: peak minus global valley.
+        p2v = max(sig) - min(sig);
+        return;
+    end
+
+    p2v = max(proms);
 end
 
 function Y_clean = generate_clean_observation(A0_noiseless, X0)
@@ -508,7 +591,7 @@ function N_obs = convert_side_length_ratio_to_n_obs(side_length_ratio, SNR, LDoS
     % Convert (side_length_ratio, SNR, selected kernel slices) to N_obs
     % using the largest cutoff over all selected slices.
     M_max = get_max_cutoff_over_slices(LDoS_sim, sliceidx, SNR, N_single);
-    N_obs = max(3, round(M_max / side_length_ratio));
+    N_obs = max(3, round((2 * M_max) / side_length_ratio));
 end
 
 function M_max = get_max_cutoff_over_slices(LDoS_sim, sliceidx, SNR, N_single)
@@ -519,7 +602,7 @@ function M_max = get_max_cutoff_over_slices(LDoS_sim, sliceidx, SNR, N_single)
     M_max = max(M_values);
 end
 
-function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, rho_d, SNR, N_obs, area_ratio, repetition)
+function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, rho_d, SNR, N_obs, area_ratio, designed_side_length_ratio, repetition)
     dataset.Y = Y;
     dataset.Y_clean = Y_clean;
     dataset.A0 = A0;
@@ -536,10 +619,11 @@ function dataset = store_dataset(Y, Y_clean, A0, A0_noiseless, X0, b0, rho_d, SN
     dataset.A1 = initialize_kernels_from_isolated_points(Y, X0, A0);
     
     dataset.params = struct('defect_density', rho_d, ...
-                          'kernel_size', kernel_sizes, ...  % [n×2] matrix of kernel sizes
+                          'kernel_size', kernel_sizes, ...
                           'SNR', SNR, ...
                           'N_obs', N_obs, ...
                           'area_ratio', area_ratio, ...
+                          'designed_side_length_ratio', designed_side_length_ratio, ...
                           'repetition', repetition);
     dataset.b0 = b0;
 end
@@ -681,3 +765,94 @@ function confirm_dataset()
     assignin('base', 'activation_confirmed', true);
     uiresume;
 end 
+
+function Y_out = apply_center_defect_mask_selected_slices(Y_in, sliceidx)
+%APPLY_CENTER_DEFECT_MASK_SELECTED_SLICES Apply center Gaussian mask to chosen slices.
+%   For each selected slice, user chooses only the radius using a fixed-center circle.
+
+    Y_out = Y_in;
+    [h, w, ~] = size(Y_in);
+    center = [(w + 1) / 2, (h + 1) / 2]; % [x, y]
+
+    fprintf('\nCenter-defect masking for selected slices...\n');
+    for i = 1:numel(sliceidx)
+        s = sliceidx(i);
+        fprintf('  Slice %d (%d/%d): choose mask radius and confirm.\n', s, i, numel(sliceidx));
+
+        sigma = select_center_radius_ui(Y_in(:,:,s), center);
+        center_xy = center;
+        mask2d = build_center_gaussian_mask([h, w], center_xy, sigma);
+
+        % Use gaussianMaskDefects with provided mask (no center selection UI).
+        slice_3d = reshape(Y_in(:,:,s), [h, w, 1]);
+        [masked_slice_3d, ~] = gaussianMaskDefects(slice_3d, 1, 1, mask2d);
+        Y_out(:,:,s) = masked_slice_3d(:,:,1);
+    end
+end
+
+function sigma = select_center_radius_ui(slice_data, center)
+%SELECT_CENTER_RADIUS_UI Radius-only UI with fixed center.
+
+    f = figure('Name', 'Center Defect Mask Radius', 'Position', [100, 100, 800, 650]);
+    imagesc(slice_data);
+    colormap('gray'); colorbar; axis image;
+    caxis([min(slice_data(:)), max(slice_data(:))]);
+    title('Adjust radius at fixed center, then click Confirm');
+    hold on;
+    plot(center(1), center(2), 'r+', 'MarkerSize', 12, 'LineWidth', 1.5);
+
+    default_radius = max(2, 0.08 * min(size(slice_data,1), size(slice_data,2)));
+    h_circle = drawcircle('Center', center, 'Radius', default_radius, 'Color', 'r', 'FaceAlpha', 0.1);
+    addlistener(h_circle, 'ROIMoved', @(src,~) keep_center_fixed(src, center));
+
+    uicontrol('Style', 'text', 'String', 'Radius:', ...
+              'Position', [10, 10, 60, 20], 'BackgroundColor', get(f,'Color'));
+    h_edit = uicontrol('Style', 'edit', 'String', num2str(default_radius, '%.2f'), ...
+                       'Position', [70, 10, 70, 24], ...
+                       'Callback', @(src,~) update_radius_from_edit(src, h_circle));
+    uicontrol('Style', 'pushbutton', 'String', 'Confirm', ...
+              'Position', [150, 10, 90, 24], ...
+              'Callback', @(~,~) uiresume(f));
+
+    addlistener(h_circle, 'ROIMoved', @(src,~) sync_radius_edit(src, h_edit));
+    uiwait(f);
+    sigma = h_circle.Radius;
+    if isvalid(f)
+        close(f);
+    end
+end
+
+function keep_center_fixed(h_circle, center)
+    if isvalid(h_circle)
+        h_circle.Center = center;
+    end
+end
+
+function update_radius_from_edit(h_edit, h_circle)
+    r = str2double(h_edit.String);
+    if isfinite(r) && r > 0 && isvalid(h_circle)
+        h_circle.Radius = r;
+    end
+end
+
+function sync_radius_edit(h_circle, h_edit)
+    if isvalid(h_circle) && isvalid(h_edit)
+        h_edit.String = num2str(h_circle.Radius, '%.2f');
+    end
+end
+
+function mask2d = build_center_gaussian_mask(sz_hw, center_xy, sigma)
+%BUILD_CENTER_GAUSSIAN_MASK Build mask matching gaussianMaskDefects profile.
+
+    h = sz_hw(1);
+    w = sz_hw(2);
+    [X, Y] = meshgrid(1:w, 1:h);
+    distance_squared = (X - center_xy(1)).^2 + (Y - center_xy(2)).^2;
+    distance = sqrt(distance_squared);
+
+    step_loc = 2 * sigma;
+    step_shapeness = 10;
+    smooth_step = 0.5 + 0.5 * tanh(-step_shapeness * (distance - step_loc));
+    gaussian = 0.99 * exp(-distance_squared / (2 * sigma^2)) .* smooth_step;
+    mask2d = 1 - gaussian;
+end

@@ -22,7 +22,7 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_sizes, kerneltype, windo
     switch lower(kerneltype)
         case 'random'
             for n = 1:num_kernels
-                A1{n} = proj2oblique(randn(kernel_sizes(n,:)));
+                %A1{n} = proj2oblique(randn(kernel_sizes(n,:)));
                 % Apply window if specified
                 if ~isempty(window_type)
                     A1{n} = apply_window(A1{n}, window_type);
@@ -76,7 +76,7 @@ function A1 = initialize_kernels(Y, num_kernels, kernel_sizes, kerneltype, windo
                 selected_kernel = Y(y1:y2, x1:x2);
 
                 % Project onto the oblique manifold
-                A1{n} = proj2oblique(selected_kernel);
+                A1{n} = (selected_kernel);
                 %A1{n} = (selected_kernel);
                 
                 % Apply window if specified

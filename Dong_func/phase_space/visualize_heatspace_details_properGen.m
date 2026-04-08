@@ -1,42 +1,69 @@
-function visualize_heatspace_details_properGen(dataset_metrics)
-    % First show heatspace for reference
-    metrics2heat_properGen(dataset_metrics);
+function visualize_heatspace_details_properGen(dataset_metrics, mode)
+    if nargin < 2 || isempty(mode)
+        mode = 1;
+    end
+
+    % Show reference heatspace with the chosen mode
+    metrics2heat_properGen(dataset_metrics, mode);
     
-    % Get user input for parameters
+    has_repetitions = isfield(dataset_metrics, 'repetition_values') && ...
+                      length(dataset_metrics.repetition_values) > 1;
+
+    % Prompt user for parameter selection (axis-3 depends on mode)
     fprintf('\nAvailable parameter ranges:\n');
     fprintf('Theta Cap: [%.2e to %.2e]\n', min(dataset_metrics.theta_cap_values), max(dataset_metrics.theta_cap_values));
     fprintf('SNR: [%.1f to %.1f]\n', min(dataset_metrics.SNR_values), max(dataset_metrics.SNR_values));
-    fprintf('Nobs: [%.0f to %.0f]\n', min(dataset_metrics.Nobs_values), max(dataset_metrics.Nobs_values));
-    
-    % Check if repetitions are available
-    has_repetitions = isfield(dataset_metrics, 'repetition_values') && ...
-                      length(dataset_metrics.repetition_values) > 1;
+    if mode == 2 && isfield(dataset_metrics, 'side_length_ratio_values') && ~isempty(dataset_metrics.side_length_ratio_values)
+        fprintf('Side-length ratio: [%.4f to %.4f]\n', ...
+            min(dataset_metrics.side_length_ratio_values), max(dataset_metrics.side_length_ratio_values));
+    else
+        fprintf('Nobs: [%.0f to %.0f]\n', min(dataset_metrics.Nobs_values), max(dataset_metrics.Nobs_values));
+    end
     if has_repetitions
         fprintf('Repetitions: [%d to %d]\n', min(dataset_metrics.repetition_values), max(dataset_metrics.repetition_values));
     end
     
-    % Get user input
     theta_cap = input('Enter Theta Cap value: ');
     snr = input('Enter SNR value: ');
-    nobs = input('Enter Nobs value: ');
+
+    if mode == 2 && isfield(dataset_metrics, 'side_length_ratio_values') && ~isempty(dataset_metrics.side_length_ratio_values)
+        ratio_input = input('Enter Side-length ratio value: ');
+        [~, side_idx] = min(abs(dataset_metrics.side_length_ratio_values - ratio_input));
+        fprintf('  → Nearest ratio on grid: %.4f\n', dataset_metrics.side_length_ratio_values(side_idx));
+    else
+        ratio_input = [];
+    end
+
+    nobs_input = [];
+    if isempty(ratio_input)
+        nobs_input = input('Enter Nobs value: ');
+    end
     
-    % Get repetition if available
     if has_repetitions
         rep = input(sprintf('Enter Repetition number [%d-%d] (or press Enter to use first available): ', ...
             min(dataset_metrics.repetition_values), max(dataset_metrics.repetition_values)));
         if isempty(rep)
-            rep = 1;  % Default to first repetition
+            rep = 1;
         end
     else
-        rep = 1;  % Default for backward compatibility
+        rep = 1;
     end
     
-    % Find nearest indices in the parameter space
+    % Map inputs to indices in the primary [SNR × theta × N_obs × rep] arrays
     [~, theta_idx] = min(abs(dataset_metrics.theta_cap_values - theta_cap));
     [~, snr_idx] = min(abs(dataset_metrics.SNR_values - snr));
-    [~, nobs_idx] = min(abs(dataset_metrics.Nobs_values - nobs));
+
+    if ~isempty(nobs_input)
+        [~, nobs_idx] = min(abs(dataset_metrics.Nobs_values - nobs_input));
+    else
+        % Mode 2: resolve side_length_ratio → nearest populated N_obs for this SNR.
+        % Scan the N_obs dimension for the first non-empty entry at this (snr, theta, *, rep).
+        nobs_idx = resolve_nobs_from_side_ratio(dataset_metrics, snr_idx, theta_idx, side_idx, rep);
+        if isempty(nobs_idx)
+            error('No reconstruction data found for the selected (SNR, density, side-length ratio) combination.');
+        end
+    end
     
-    % Find repetition index
     if has_repetitions
         [~, rep_idx] = min(abs(dataset_metrics.repetition_values - rep));
         rep_actual = dataset_metrics.repetition_values(rep_idx);
@@ -45,11 +72,13 @@ function visualize_heatspace_details_properGen(dataset_metrics)
         rep_actual = 1;
     end
     
-    % Print actual values being used (in case of rounding)
     fprintf('\nUsing nearest available parameters:\n');
     fprintf('Theta Cap: %.2e\n', dataset_metrics.theta_cap_values(theta_idx));
     fprintf('SNR: %.1f\n', dataset_metrics.SNR_values(snr_idx));
     fprintf('Nobs: %.0f\n', dataset_metrics.Nobs_values(nobs_idx));
+    if ~isempty(ratio_input)
+        fprintf('Side-length ratio (requested): %.4f\n', dataset_metrics.side_length_ratio_values(side_idx));
+    end
     if has_repetitions
         fprintf('Repetition: %d\n', rep_actual);
     end
@@ -146,6 +175,52 @@ function visualize_heatspace_details_properGen(dataset_metrics)
         if isfield(extras.phase1, 'activation_metrics')
             act_traj = extras.phase1.activation_metrics;
             fprintf('Final Activation Similarity: %.3f\n', act_traj(end));
+        end
+    end
+end
+
+function nobs_idx = resolve_nobs_from_side_ratio(dm, snr_idx, theta_idx, side_idx, rep_val)
+%RESOLVE_NOBS_FROM_SIDE_RATIO Find N_obs index whose _by_side_length_ratio
+%   slot matches the chosen side_idx and has reconstruction data.
+    nobs_idx = [];
+    has_rep = ndims(dm.Y) == 4;
+    rep_idx = max(1, rep_val);
+
+    % Build the set of candidate N_obs indices that have data
+    for ni = 1:numel(dm.Nobs_values)
+        if has_rep
+            entry = dm.Aout{snr_idx, theta_idx, ni, rep_idx};
+        else
+            entry = dm.Aout{snr_idx, theta_idx, ni};
+        end
+        if isempty(entry)
+            continue;
+        end
+        % Check if this N_obs maps to the requested side_idx
+        if isfield(dm, 'kernel_quality_final_by_side_length_ratio')
+            side_val = dm.kernel_quality_final_by_side_length_ratio(snr_idx, theta_idx, side_idx, rep_idx);
+            if has_rep
+                nobs_val = dm.kernel_quality_final(snr_idx, theta_idx, ni, rep_idx);
+            else
+                nobs_val = dm.kernel_quality_final(snr_idx, theta_idx, ni);
+            end
+            if ~isnan(side_val) && ~isnan(nobs_val) && abs(side_val - nobs_val) < 1e-10
+                nobs_idx = ni;
+                return;
+            end
+        end
+    end
+
+    % Fallback: return first non-empty N_obs for this (SNR, theta)
+    for ni = 1:numel(dm.Nobs_values)
+        if has_rep
+            entry = dm.Aout{snr_idx, theta_idx, ni, rep_idx};
+        else
+            entry = dm.Aout{snr_idx, theta_idx, ni};
+        end
+        if ~isempty(entry)
+            nobs_idx = ni;
+            return;
         end
     end
 end

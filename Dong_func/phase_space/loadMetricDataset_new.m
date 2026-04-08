@@ -15,11 +15,10 @@ function dataset_metrics = loadMetricDataset_new()
         error('No synthetic dataset file found');
     end
 
-    % Load parameter information
+    % Load parameter information (include side_length_ratio_values if saved by gen script)
     try
-        synthetic_data = load(fullfile(folder_path, synthetic_files(1).name), 'datasets', 'param_sets', 'descriptions');
-        % Note: param_sets may have fewer rows than datasets if repetitions were used
-        % We'll extract unique parameter values from the actual datasets
+        synthetic_data = load(fullfile(folder_path, synthetic_files(1).name), ...
+            'datasets', 'param_sets', 'descriptions', 'side_length_ratio_values');
     catch ME
         error('Failed to load synthetic dataset file: %s', ME.message);
     end
@@ -30,7 +29,9 @@ function dataset_metrics = loadMetricDataset_new()
     all_theta = [];
     all_nobs = [];
     all_side_length_ratio = [];
+    all_designed_side_length_ratio = [];
     all_reps = [];
+    has_designed_ratio = false;
     for i = 1:length(synthetic_data.datasets)
         if isfield(synthetic_data.datasets(i).params, 'SNR')
             all_snr = [all_snr; synthetic_data.datasets(i).params.SNR];
@@ -47,7 +48,12 @@ function dataset_metrics = loadMetricDataset_new()
         elseif isfield(synthetic_data.datasets(i).params, 'Nobs')
             all_nobs = [all_nobs; synthetic_data.datasets(i).params.Nobs];
         end
-        % Optional side-length ratio handle (fallback to legacy area_ratio name)
+        % Designed side-length ratio (exact grid value from generation)
+        if isfield(synthetic_data.datasets(i).params, 'designed_side_length_ratio')
+            all_designed_side_length_ratio = [all_designed_side_length_ratio; synthetic_data.datasets(i).params.designed_side_length_ratio];
+            has_designed_ratio = true;
+        end
+        % Actual side-length ratio (may differ due to N_obs rounding)
         if isfield(synthetic_data.datasets(i).params, 'side_length_ratio')
             all_side_length_ratio = [all_side_length_ratio; synthetic_data.datasets(i).params.side_length_ratio];
         elseif isfield(synthetic_data.datasets(i).params, 'area_ratio')
@@ -65,6 +71,24 @@ function dataset_metrics = loadMetricDataset_new()
     unique_snr = unique(all_snr);
     unique_theta = unique(all_theta);
     unique_nobs = unique(all_nobs);
+    
+    % Determine the canonical side-length ratio grid for indexing.
+    % Priority: (1) designed_side_length_ratio field, (2) side_length_ratio_values
+    % saved at generation time, (3) snap actual ratios via uniquetol.
+    if has_designed_ratio
+        unique_designed_ratio = unique(all_designed_side_length_ratio);
+        fprintf('Using designed_side_length_ratio for grid indexing (%d unique values).\n', numel(unique_designed_ratio));
+    elseif isfield(synthetic_data, 'side_length_ratio_values')
+        unique_designed_ratio = synthetic_data.side_length_ratio_values(:);
+        fprintf('Using saved side_length_ratio_values for grid indexing (%d values).\n', numel(unique_designed_ratio));
+    elseif ~isempty(all_side_length_ratio)
+        snap_tol = 0.02;
+        unique_designed_ratio = uniquetol(all_side_length_ratio, snap_tol);
+        fprintf('No designed ratio found; snapped actual ratios with tol=%.3f → %d bins.\n', ...
+            snap_tol, numel(unique_designed_ratio));
+    else
+        unique_designed_ratio = [];
+    end
     
     % Determine repetition dimension size using two methods (robust approach)
     num_datasets = length(synthetic_data.datasets);
@@ -97,10 +121,8 @@ function dataset_metrics = loadMetricDataset_new()
     dataset_metrics.SNR_values = unique_snr;
     dataset_metrics.theta_cap_values = unique_theta;
     dataset_metrics.Nobs_values = unique_nobs;
-    unique_side_length_ratio = [];
-    if ~isempty(all_side_length_ratio)
-        unique_side_length_ratio = unique(all_side_length_ratio);
-        dataset_metrics.side_length_ratio_values = unique_side_length_ratio;
+    if ~isempty(unique_designed_ratio)
+        dataset_metrics.side_length_ratio_values = unique_designed_ratio;
     end
     dataset_metrics.repetition_values = unique_reps;
     
@@ -116,9 +138,9 @@ function dataset_metrics = loadMetricDataset_new()
     dataset_metrics.combined_activationScore = nan(dims);
     dataset_metrics.demixing_score = nan(dims);
     
-    % Optional parallel indexing: [SNR × theta × side_length_ratio × rep]
-    if ~isempty(unique_side_length_ratio)
-        dims_side = [length(unique_snr), length(unique_theta), length(unique_side_length_ratio), max_rep];
+    % Parallel indexing by designed side-length ratio: [SNR × theta × side_length_ratio × rep]
+    if ~isempty(unique_designed_ratio)
+        dims_side = [length(unique_snr), length(unique_theta), length(unique_designed_ratio), max_rep];
         dataset_metrics.kernel_quality_final_by_side_length_ratio = nan(dims_side);
         dataset_metrics.activation_similarity_final_by_side_length_ratio = nan(dims_side);
         dataset_metrics.demixing_score_by_side_length_ratio = nan(dims_side);
@@ -193,12 +215,22 @@ function dataset_metrics = loadMetricDataset_new()
                 continue;
             end
 
-            % Optional side-length ratio for parallel indexing
-            side_length_ratio_val = [];
-            if isfield(dataset.params, 'side_length_ratio')
-                side_length_ratio_val = dataset.params.side_length_ratio;
-            elseif isfield(dataset.params, 'area_ratio')
-                side_length_ratio_val = dataset.params.area_ratio;
+            % Resolve designed side-length ratio for parallel indexing.
+            % Priority: designed_side_length_ratio > area_ratio snapped to grid.
+            designed_ratio_val = [];
+            if isfield(dataset.params, 'designed_side_length_ratio')
+                designed_ratio_val = dataset.params.designed_side_length_ratio;
+            elseif ~isempty(unique_designed_ratio)
+                actual_ratio = [];
+                if isfield(dataset.params, 'side_length_ratio')
+                    actual_ratio = dataset.params.side_length_ratio;
+                elseif isfield(dataset.params, 'area_ratio')
+                    actual_ratio = dataset.params.area_ratio;
+                end
+                if ~isempty(actual_ratio)
+                    [~, closest_idx] = min(abs(unique_designed_ratio - actual_ratio));
+                    designed_ratio_val = unique_designed_ratio(closest_idx);
+                end
             end
             
             % Get repetition index (check both 'rep' and 'repetition' fields, default to 1 for backward compatibility)
@@ -216,8 +248,8 @@ function dataset_metrics = loadMetricDataset_new()
             nobs_idx = find(abs(unique_nobs - nobs_val) < 1e-10, 1);
             rep_idx = rep_val;  % Repetition is already an index (1, 2, 3, ...)
             side_idx = [];
-            if ~isempty(unique_side_length_ratio) && ~isempty(side_length_ratio_val)
-                side_idx = find(abs(unique_side_length_ratio - side_length_ratio_val) < 1e-10, 1);
+            if ~isempty(unique_designed_ratio) && ~isempty(designed_ratio_val)
+                side_idx = find(abs(unique_designed_ratio - designed_ratio_val) < 1e-10, 1);
             end
             
             if isempty(snr_idx) || isempty(theta_idx) || isempty(nobs_idx)
