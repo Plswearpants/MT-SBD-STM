@@ -60,6 +60,4 @@ function kernel_out = windowToKernel(kernel, window_type, varargin)
     % Apply window to kernel
     kernel_out = kernel .* window_2d;
     
-    % Normalize output kernel to preserve energy
-    kernel_out = kernel_out / sum(kernel_out(:)) * sum(kernel(:));
 end

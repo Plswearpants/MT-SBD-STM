@@ -1,0 +1,16 @@
+---
+description: Keep update/deprecation notes in appendable table logs
+alwaysApply: true
+---
+
+# Update/Deprecation Logging Standard
+
+When making project updates, deprecations, retirements, or migrations:
+
+- Maintain a markdown table log under `history/` rather than plain text bullets.
+- Append a new row (do not rewrite prior rows unless correcting errors).
+- Use columns: `Date`, `Type`, `Component`, `Change`, `Caller Migration`, `Legacy Recovery`.
+- In `Caller Migration`, list concrete file paths that were updated.
+- In `Legacy Recovery`, state how to recover old behavior (for example, git history or archived file path).
+
+Prefer one table per topic file (for example, `history/<component>_retirement.md`) so future rows stay easy to append.

@@ -2,8 +2,10 @@ function [ Y ] = convfft3( A, X, varargin )
 %CONVFFT3   FFT implementation of 2D linear convolution for 3D arrays
 %   Performs 2D convolution along the third dimension of 3D arrays
 %
-%   Y = convfft3(A, X) convolves each slice of A with corresponding slice of X
-%   A and X must be 3D arrays with matching third dimension
+%   Y = convfft3(A, X) convolves each slice of A with X.
+%   A must be a 3D array of kernels. X can be:
+%   - 3D with matching third dimension (slice-wise convolution), or
+%   - 2D / single-slice, which is applied to all slices of A.
 %
 %   Y = convfft3(..., adj, tmpsz, outsz)  
 %   applies the adjoint operation if ADJ==TRUE
@@ -15,12 +17,18 @@ function [ Y ] = convfft3( A, X, varargin )
 %       Y = convfft3(A, X);  % Convolve each slice
 
     % Validate input dimensions
-    if ndims(A) ~= 3 || ndims(X) ~= 3
-        error('Inputs must be 3D arrays');
+    if ndims(A) ~= 3
+        error('A must be a 3D array.');
     end
-    
-    if size(A,3) ~= size(X,3)
-        error('Third dimension of A and X must match');
+
+    if ndims(X) > 3
+        error('X must be a 2D or 3D array.');
+    end
+
+    if ismatrix(X) || size(X,3) == 1
+        X = X(:,:,ones(1,size(A,3)));
+    elseif size(A,3) ~= size(X,3)
+        error('Third dimension of A and X must match, or X must be 2D/single-slice.');
     end
     
     % Parse optional arguments

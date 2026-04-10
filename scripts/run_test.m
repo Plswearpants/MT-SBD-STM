@@ -1,183 +1,3 @@
-%% Block 1: Load the .3ds data
-
-% INPUTS
-% 1: Data file to load, including file type ('QPI.3ds' for example)
-% 2: Smoothing sigma for current data
-
-% OUTPUTS
-% header: Variable containing all experimental parameters
-% I: Current data, smoothed by sigma
-% dIdV: Numerically differentiated current data
-% voltage: Vector of voltages for current
-% midV: Vector on voltages for dIdV/QPI (midpoint of voltage vector)
-% QPI: Fourier transformed dIdV data
-
-% Modified function load3dsall from supplied matlab code from Nanonis
-[header, par, I, dIdV, LockindIdV, bias, midV, QPI, LockinQPI] = load3dsall('QPImap012.3ds', 10);
-xsize = header.grid_dim(1);
-ysize = header.grid_dim(2);
-elayer = header.points;
-estart = par(1);
-eend = par(2);
-energy_range = linspace(estart, eend, elayer);
-data_original = dIdV;
-num_slices = size(data_original,3);
-spatial = size(data_original,1);
-%% ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Block 2: Data preprocessing
-% initialize the preprocessing parameters
-preprocessing_params = struct();
-data_carried = data_original;
-rangetype='dynamic';
-figure;
-d3gridDisplay(data_carried,rangetype);
-preprocessing_params.slice_normalize = input('slice to normalize: ');
-
-%% 2.1: Remove bragg peaks
-% Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
-% Bragg remove
-[data_braggremoved]=removeBragg(data_carried);
-data_carried = data_braggremoved;
-
-%% 2.2: crop dataset
-mask= maskSquare(data_carried,0,40,'square');
-data_cropped= gridCropMask(data_carried, mask);
-data_carried = data_cropped;
-
-%% 2.3 data selection 
-rangetype='dynamic';
-figure;
-d3gridDisplay(data_carried,rangetype);
-preprocessing_params.slices = input('input a list of slices: ');
-data_selected=data_carried(:,:,preprocessing_params.slices);
-energy_selected = energy_range(preprocessing_params.slices);
-close;
-data_carried = data_selected; 
-
-%% 2.4: MANUAL Local streak removal and interpolation 
-preprocessing_params.manualStreakRemoval_slices = 1:size(data_carried,3);
-factor = 2;
-preprocessing_params.manualStreakRemoval_factor = factor;
-Y_local_removed = zeros(size(data_carried));
-
-for s = preprocessing_params.manualStreakRemoval_slices
-    [~, var_list, low_list] = streak_correction(data_carried(:,:,s),3,'valley');
-    figure; plot(low_list, var_list);
-    [min_var,min_idx]=min(var_list);
-    min_low = low_list(min_idx);
-
-    [Y_local_removed(:,:,s), ~] = removeLocalStreaks(data_carried, s, factor*min_low, 3,'valley');
-
-    %[Y_local_removed(:,:,s), ~] = interpolateLocalStreaks(Y_local_removed(:,:,s), 1, 0.8* min_low);
-end
-for s = 1:size(data_carried,3)
-    if ~ismember(s, preprocessing_params.manualStreakRemoval_slices)
-        Y_local_removed(:,:,s) = data_carried(:,:,s);
-    end
-end
-data_carried = Y_local_removed;
-
-
-%% 2.4: AUTO Local Streak Removal (No UI)
-% This block runs streak correction, local streak removal, and interpolation in batch mode.
-
-% define the slices to run 
-preprocessing_params.autoStreakRemoval_slices = 1:25;
-factor1 = 1;
-factor2 = 1;
-preprocessing_params.autoStreakRemoval_factor1 = factor1;
-preprocessing_params.autoStreakRemoval_factor2 = factor2;
-data_local_removed_auto = zeros(size(data_carried));
-for s = preprocessing_params.autoStreakRemoval_slices
-    % 1. Find optimal threshold automatically (e.g., by minimizing variance)
-    [~, var_list, low_list] = streak_correction(data_carried(:,:,s), 3, 'plateau');
-    [~, min_idx] = min(var_list);
-    min_low = low_list(min_idx);
-
-    % 2. Remove local streaks automatically (no UI)
-    [data_local_removed_auto(:,:,s), ~] = removeLocalStreaks(data_carried, s, factor1*min_low, 3, 'plateau', true);
-
-    % 3. Interpolate local streaks automatically (no UI)
-    %[data_local_removed_auto(:,:,s), ~] = interpolateLocalStreaks(data_local_removed_auto(:,:,s), 1, factor2*min_low, [], true);
-    
-    % print finished status
-    fprintf('Finished slice %d\n', s);
-end
-
-% Copy back data_carried for slices not in autoStreakRemoval_slices
-for s = 1:size(data_carried,3)
-    if ~ismember(s, preprocessing_params.autoStreakRemoval_slices)
-        data_local_removed_auto(:,:,s) = data_carried(:,:,s);
-    end
-end
-
-data_carried = data_local_removed_auto;
-
-%% 2.5 defect masking
-% Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
-
-f1=figure;
-d3gridDisplay(data_carried,'dynamic');
-preprocessing_params.defect_slice = input('Enter defect slice number: ');
-preprocessing_params.num_defect_type = input('enter how many types of defects to mask: ');
-close(f1);
-% methods: 
-% 1. Gaussian window "gw"
-% 2. truncated gaussian gaussian smoothing "tg"
-% 3. thresholding and remove defect features "threshold"
-preprocessing_params.defect_masking_method = 'tg';
-
-switch preprocessing_params.defect_masking_method
-    case 'gw'
-        % Apply Gaussian window masking
-        [data_masked, ~] = defect_masking(data_carried, preprocessing_params.defect_slice);
-    case 'tg'
-        % Apply flat disk mask with Gaussian smoothing
-        % Interactive mask creation and application:
-        %if isfield(preprocessing_params, 'defect_mask') && ~isempty(preprocessing_params.defect_mask)
-            %[data_masked, ~] = gaussianMaskDefects(data_carried, [], [], preprocessing_params.defect_mask);
-        %else
-            [data_masked, preprocessing_params.defect_mask, defect_centers, sigmas] = gaussianMaskDefects(data_carried, preprocessing_params.defect_slice, preprocessing_params.num_defect_type);
-        %end
-    case 'threshold'
-        % Apply threshold-based defect masking
-        [data_masked, defect_mask] = thresholdDefects(data_carried, preprocessing_params.defect_slice);
-    otherwise
-        error('Unknown defect masking method. Choose "gw", "disk", or "threshold".');
-end
-data_carried = data_masked;
-
-%% 2.6a: Correct streak
-% Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
-
-[data_streakremoved, QPI_nostreaks] = RemoveStreaks(data_carried, 'Direction', 'vertical');
-data_carried = data_streakremoved;
-
-%% 2.6b: heal
-% Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
-
-preprocessing_params.heal_direction = input('Enter direction to heal (horizontal/vertical/none): ', 's');
-
-data_streakremoved_healed = heal_streaks(data_carried, preprocessing_params.heal_direction);
-
-%% 2.6c: directional_plane (optional, zero slope at one direction)
-% Normalize background 
-[data_carried] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
-
-preprocessing_params.real_space_direction = 'horizontal';
-[data_plane, mask] = d3plane_directional(data_carried, preprocessing_params.real_space_direction, 'LineWidth', 5);
-data_carried = data_plane;
-
-%% 2.end: Normalize background 
-[Y] = normalizeBackgroundToZeroMean3D(data_carried, rangetype, preprocessing_params.slice_normalize);
-
-%% 3. ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Save the preprocessed data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-save('LiFeAs_processed0721_FULL.mat', 'data_original', 'Y', 'data_cropped','data_masked',"energy_range", 'preprocessing_params')
-
-
 %% Before Run Standardize
 rangetype ='dynamic';
 %% 4_pre Pick reference slice
@@ -217,20 +37,28 @@ window_type = {'gaussian', 2};
 
 if same_size
     %[square_size] = squareDrawSize(Y_ref);
-    square_size=[80,80];
+    square_size = [80,80];
     kernel_sizes = repmat(square_size,[num_kernels,1]);
-    A1_ref = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
+    [A1_ref, A1_ref_crop] = initialize_kernels(Y_ref, num_kernels, kernel_sizes, kerneltype, window_type);
 else
     A1_ref = cell(1, num_kernels);
+    A1_ref_crop = cell(1, num_kernels);
     kernel_sizes = zeros(num_kernels, 2); % Store sizes of each kernel [height, width]
     for k = 1:num_kernels
         fprintf('Select region for kernel %d/%d\n', k, num_kernels);
         [square_size,position, mask] = squareDrawSize(Y_ref);           	% determine kernel size
         [A1_ref{k}, ~] = gridCropMask(Y_ref, mask);   % the cropped real data as kernel
+        A1_ref_crop{k} = A1_ref{k};
         % Need to put each slice back onto the sphere
         A1_ref{k} = proj2oblique(A1_ref{k});
         % Store the kernel size
-        kernel_sizes(k,:) = size(A1_ref{k});
+        kernel_sizes(k,:) = size(A1_ref_crop{k});
+    end
+end
+for k = 1:num_kernels
+    [A1_ref{k}, flipped_ref] = enforce_kernel_polarity(A1_ref{k}, A1_ref_crop{k});
+    if flipped_ref
+        fprintf('[kernel flip] reference kernel %d flipped\n', k);
     end
 end
 

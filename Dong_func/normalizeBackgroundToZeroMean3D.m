@@ -1,69 +1,65 @@
-function [normalized_data_3d, background_info, comment] = normalizeBackgroundToZeroMean3D(data_3d, rangeType, selected_slice)
-% Normalizes each slice of a 3D dataset by subtracting the mean of a user-selected background area.
-%   This function allows the user to interactively select a background region from a slice in a 3D dataset.
-%   For every slice, the mean of the selected background area is subtracted from each slice in the 3D dataset, 
-%   resulting in a normalized dataset slice wise.
+function [normalized_data_3d, background_info, comment, position_used] = normalizeBackgroundToZeroMean3D(data_3d, rangeType, selected_slice, position)
+% Normalizes each slice by subtracting the mean of a background area (selected once, reused).
+%   If position is provided, that rectangle is used for all slices (no UI).
+%   Otherwise the user selects a rectangle on selected_slice; it is returned for reuse.
 %
 % Arguments:
 %   data_3d          3D array containing the data to be processed.
 %   rangeType        Type of range for visualization ('global' or 'dynamic').
-%   selected_slice   (Optional) The index of the slice to use for background selection. Default is 1.
+%   selected_slice   Slice index used only when selecting the region (default 1).
+%   position         (Optional) [x, y, width, height] from a previous call. If provided, no UI.
 %
 % Returns:
-%   normalized_data_3d   The 3D data array with each slice normalized to the selected background area.
-%   background_info      [mean, variance] of the selected background area.
-%   comment              Comment for logging the function call.
-%
-% August 2024 - Dong Chen
-%
-% Example:
-%   [normalized_data_3d, background_info, comment] = normalizeBackgroundToZeroMean3D(data_3d, 'global');
-%   This example normalizes the entire 3D dataset based on the background mean from the first slice.
+%   normalized_data_3d   The 3D data with each slice normalized by the background mean.
+%   background_info      [mean, variance] of the selected background area (last slice).
+%   comment               Comment for logging.
+%   position_used         The rectangle [x, y, width, height] used (for storing/replay).
 
 arguments
     data_3d
     rangeType
-    selected_slice = 1  % Default to slice 1 if not provided
+    selected_slice = 1
+    position = []  % [x, y, width, height]; if empty, user selects interactively
 end
 
-% LOG comment of function call
-comment = sprintf("normalizeBackgroundToZeroMean3D(selected_slice:%d)|", selected_slice);
-
-% Get the dimensions of the 3D data array
 [rows, cols, k] = size(data_3d);
 
-% Display the selected slice and allow the user to select a rectangular region
-figure;
-imagesc(data_3d(:,:,selected_slice));
-%colormap('viridis');
-axis square;
-title('Select Background Area (This will be applied to all slices)');
-h = imrect;
-position = wait(h);  % Wait for the user to double-click the rectangle
-close;  % Close the figure after selection
+if isempty(position)
+    figure;
+    imagesc(data_3d(:,:,selected_slice));
+    axis square;
+    title('Select Background Area (This will be applied to all slices)');
+    h = imrect;
+    position = wait(h);
+    close;
+end
 
-% Get the coordinates of the selected rectangle
+position_used = position;
+
 x_min = round(position(1));
 y_min = round(position(2));
 x_max = round(position(1) + position(3));
 y_max = round(position(2) + position(4));
 
-% Initialize the output array with correct dimensions
-normalized_data_3d = zeros(size(data_3d));  % Use exact same size as input
+% Clamp to image bounds
+x_min = max(1, min(x_min, cols));
+x_max = max(1, min(x_max, cols));
+y_min = max(1, min(y_min, rows));
+y_max = max(1, min(y_max, rows));
+if x_min > x_max, [x_min, x_max] = deal(x_max, x_min); end
+if y_min > y_max, [y_min, y_max] = deal(y_max, y_min); end
 
-% Process each slice individually using the same background area
+comment = sprintf("normalizeBackgroundToZeroMean3D(selected_slice:%d, region:[%d %d %d %d])|", ...
+    selected_slice, x_min, y_min, x_max, y_max);
+
+normalized_data_3d = zeros(size(data_3d));
+background_info = [0, 0];
+
 for i = 1:k
     background = data_3d(y_min:y_max, x_min:x_max, i);
     background_mean = mean(background(:));
     background_info = [background_mean, var(background(:))];
-    
-    % Extract the current slice
     data = data_3d(:, :, i);
-    
-    % Normalize the entire data slice by subtracting the background mean
-    normalized_data = data - background_mean;
-    
-    % Store the normalized slice back into the 3D array
-    normalized_data_3d(:, :, i) = normalized_data;
+    normalized_data_3d(:, :, i) = data - background_mean;
 end
 end

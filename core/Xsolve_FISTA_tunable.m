@@ -17,7 +17,7 @@ if nargin < 5
 end
 
 load([fileparts(mfilename('fullpath')) '/../examples/Xsolve_config_tunable.mat']); %#ok<*LOAD>
-print("load")
+%print("load")
 % Initialize variables and function handles:
 fpath = fileparts(mfilename('fullpath'));
 addpath([fpath '/helpers']);
