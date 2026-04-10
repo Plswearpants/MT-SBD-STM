@@ -2,7 +2,7 @@ clc; clear;
 run('../init_sbd');
 
 %% Load pre-generated synthetic datasets
-syn_loc = 'results\synthetic_datasets\synthetic_datasets_20251108_114222.mat';
+syn_loc = 'results\synthetic_datasets\synthetic_datasets_20260403_233155.mat';
 load(syn_loc);  
 
 %% Initialize kernels for all datasets
@@ -29,7 +29,8 @@ else
     init_type = '_init_random';
 end
 new_filename = fullfile(filepath, [name, init_type, ext]);
-save(new_filename, 'datasets');
+% Use -v7.3 (HDF5) to support very large initialized dataset files.
+save(new_filename, 'datasets', '-v7.3');
 fprintf('Saved initialized kernels to: %s\n', new_filename);
 
 %% Visualize initialized kernels for random datasets
@@ -49,7 +50,7 @@ drawnow;
 %% Define optimal parameters (no longer need parameter loops)
 lambda1_optimal = 0.2;  % example value
 mini_loop_optimal = 3;  % example value
-maxIT = 15;
+maxIT = 10;
 
 % Create single parameter combination
 param_combinations = [lambda1_optimal, mini_loop_optimal];
@@ -104,11 +105,17 @@ end
 % Create DataQueue for progress updates
 D = parallel.pool.DataQueue;
 completed_count = 0;
-progress_callback = @(x) updateProgress(x, num_datasets);
+missing_n = [61:86,677:704];
+num_missing = numel(missing_n);
+progress_callback = @(x) updateProgress(x, num_missing);
+%progress_callback = @(x) updateProgress(x, num_datasets);
 afterEach(D, progress_callback);
 
+% Parallel loop over missing datasets only
+parfor i = 1:num_missing
+    n = missing_n(i);
 % Parallel loop over datasets
-parfor n = 1:num_datasets
+%parfor n = 1:num_datasets
     try
         % Extract dataset parameters
         dataset_Y = datasets(n).Y;
@@ -405,5 +412,6 @@ function save_results(filename, Aout, Xout, bout, extras, param_combinations, ..
     s(1).param_idx = param_idx;
     s(1).dataset_A0 = {dataset_A0};
     s(1).dataset_X0 = {dataset_X0};
-    save(filename, '-fromstruct', s);
+    % Use -v7.3 for large per-dataset result payloads.
+    save(filename, '-fromstruct', s, '-v7.3');
 end

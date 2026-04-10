@@ -15,11 +15,10 @@ function dataset_metrics = loadMetricDataset_new()
         error('No synthetic dataset file found');
     end
 
-    % Load parameter information
+    % Load parameter information (include side_length_ratio_values if saved by gen script)
     try
-        synthetic_data = load(fullfile(folder_path, synthetic_files(1).name), 'datasets', 'param_sets', 'descriptions');
-        % Note: param_sets may have fewer rows than datasets if repetitions were used
-        % We'll extract unique parameter values from the actual datasets
+        synthetic_data = load(fullfile(folder_path, synthetic_files(1).name), ...
+            'datasets', 'param_sets', 'descriptions', 'side_length_ratio_values');
     catch ME
         error('Failed to load synthetic dataset file: %s', ME.message);
     end
@@ -29,7 +28,10 @@ function dataset_metrics = loadMetricDataset_new()
     all_snr = [];
     all_theta = [];
     all_nobs = [];
+    all_side_length_ratio = [];
+    all_designed_side_length_ratio = [];
     all_reps = [];
+    has_designed_ratio = false;
     for i = 1:length(synthetic_data.datasets)
         if isfield(synthetic_data.datasets(i).params, 'SNR')
             all_snr = [all_snr; synthetic_data.datasets(i).params.SNR];
@@ -46,6 +48,17 @@ function dataset_metrics = loadMetricDataset_new()
         elseif isfield(synthetic_data.datasets(i).params, 'Nobs')
             all_nobs = [all_nobs; synthetic_data.datasets(i).params.Nobs];
         end
+        % Designed side-length ratio (exact grid value from generation)
+        if isfield(synthetic_data.datasets(i).params, 'designed_side_length_ratio')
+            all_designed_side_length_ratio = [all_designed_side_length_ratio; synthetic_data.datasets(i).params.designed_side_length_ratio];
+            has_designed_ratio = true;
+        end
+        % Actual side-length ratio (may differ due to N_obs rounding)
+        if isfield(synthetic_data.datasets(i).params, 'side_length_ratio')
+            all_side_length_ratio = [all_side_length_ratio; synthetic_data.datasets(i).params.side_length_ratio];
+        elseif isfield(synthetic_data.datasets(i).params, 'area_ratio')
+            all_side_length_ratio = [all_side_length_ratio; synthetic_data.datasets(i).params.area_ratio];
+        end
         % Check for repetition parameter (check both 'rep' and 'repetition' for compatibility)
         if isfield(synthetic_data.datasets(i).params, 'rep')
             all_reps = [all_reps; synthetic_data.datasets(i).params.rep];
@@ -58,6 +71,24 @@ function dataset_metrics = loadMetricDataset_new()
     unique_snr = unique(all_snr);
     unique_theta = unique(all_theta);
     unique_nobs = unique(all_nobs);
+    
+    % Determine the canonical side-length ratio grid for indexing.
+    % Priority: (1) designed_side_length_ratio field, (2) side_length_ratio_values
+    % saved at generation time, (3) snap actual ratios via uniquetol.
+    if has_designed_ratio
+        unique_designed_ratio = unique(all_designed_side_length_ratio);
+        fprintf('Using designed_side_length_ratio for grid indexing (%d unique values).\n', numel(unique_designed_ratio));
+    elseif isfield(synthetic_data, 'side_length_ratio_values')
+        unique_designed_ratio = synthetic_data.side_length_ratio_values(:);
+        fprintf('Using saved side_length_ratio_values for grid indexing (%d values).\n', numel(unique_designed_ratio));
+    elseif ~isempty(all_side_length_ratio)
+        snap_tol = 0.02;
+        unique_designed_ratio = uniquetol(all_side_length_ratio, snap_tol);
+        fprintf('No designed ratio found; snapped actual ratios with tol=%.3f → %d bins.\n', ...
+            snap_tol, numel(unique_designed_ratio));
+    else
+        unique_designed_ratio = [];
+    end
     
     % Determine repetition dimension size using two methods (robust approach)
     num_datasets = length(synthetic_data.datasets);
@@ -90,6 +121,9 @@ function dataset_metrics = loadMetricDataset_new()
     dataset_metrics.SNR_values = unique_snr;
     dataset_metrics.theta_cap_values = unique_theta;
     dataset_metrics.Nobs_values = unique_nobs;
+    if ~isempty(unique_designed_ratio)
+        dataset_metrics.side_length_ratio_values = unique_designed_ratio;
+    end
     dataset_metrics.repetition_values = unique_reps;
     
     % Initialize metric arrays with pre-allocated memory (4D: SNR × theta × N_obs × rep)
@@ -103,6 +137,15 @@ function dataset_metrics = loadMetricDataset_new()
     dataset_metrics.relative_changes = cell(dims);
     dataset_metrics.combined_activationScore = nan(dims);
     dataset_metrics.demixing_score = nan(dims);
+    
+    % Parallel indexing by designed side-length ratio: [SNR × theta × side_length_ratio × rep]
+    if ~isempty(unique_designed_ratio)
+        dims_side = [length(unique_snr), length(unique_theta), length(unique_designed_ratio), max_rep];
+        dataset_metrics.kernel_quality_final_by_side_length_ratio = nan(dims_side);
+        dataset_metrics.activation_similarity_final_by_side_length_ratio = nan(dims_side);
+        dataset_metrics.demixing_score_by_side_length_ratio = nan(dims_side);
+        dataset_metrics.combined_activationScore_by_side_length_ratio = nan(dims_side);
+    end
     
     % Add storage for reconstruction data
     dataset_metrics.Y = cell(dims);          % Original observations from synthetic data
@@ -171,6 +214,24 @@ function dataset_metrics = loadMetricDataset_new()
                 warning('Dataset %d missing N_obs/Nobs parameter, skipping', dataset_num);
                 continue;
             end
+
+            % Resolve designed side-length ratio for parallel indexing.
+            % Priority: designed_side_length_ratio > area_ratio snapped to grid.
+            designed_ratio_val = [];
+            if isfield(dataset.params, 'designed_side_length_ratio')
+                designed_ratio_val = dataset.params.designed_side_length_ratio;
+            elseif ~isempty(unique_designed_ratio)
+                actual_ratio = [];
+                if isfield(dataset.params, 'side_length_ratio')
+                    actual_ratio = dataset.params.side_length_ratio;
+                elseif isfield(dataset.params, 'area_ratio')
+                    actual_ratio = dataset.params.area_ratio;
+                end
+                if ~isempty(actual_ratio)
+                    [~, closest_idx] = min(abs(unique_designed_ratio - actual_ratio));
+                    designed_ratio_val = unique_designed_ratio(closest_idx);
+                end
+            end
             
             % Get repetition index (check both 'rep' and 'repetition' fields, default to 1 for backward compatibility)
             if isfield(dataset.params, 'rep')
@@ -186,6 +247,10 @@ function dataset_metrics = loadMetricDataset_new()
             theta_idx = find(abs(unique_theta - theta_val) < 1e-10, 1);
             nobs_idx = find(abs(unique_nobs - nobs_val) < 1e-10, 1);
             rep_idx = rep_val;  % Repetition is already an index (1, 2, 3, ...)
+            side_idx = [];
+            if ~isempty(unique_designed_ratio) && ~isempty(designed_ratio_val)
+                side_idx = find(abs(unique_designed_ratio - designed_ratio_val) < 1e-10, 1);
+            end
             
             if isempty(snr_idx) || isempty(theta_idx) || isempty(nobs_idx)
                 warning('Dataset %d: Could not map parameters to indices (SNR=%.2e, theta=%.2e, N_obs=%d), skipping', ...
@@ -240,17 +305,30 @@ function dataset_metrics = loadMetricDataset_new()
                     % Store metrics from original order
                     kernel_quality_final = mean(quality_scores.no_flip.kernel_similarity);
                     dataset_metrics.kernel_quality_final(indices(1), indices(2), indices(3), indices(4)) = kernel_quality_final;
+                    if ~isempty(side_idx)
+                        dataset_metrics.kernel_quality_final_by_side_length_ratio(indices(1), indices(2), side_idx, indices(4)) = kernel_quality_final;
+                    end
 
                     act_sim_final = mean(quality_scores.no_flip.activation_similarity);
                     dataset_metrics.activation_similarity_final(indices(1), indices(2), indices(3), indices(4)) = act_sim_final;
+                    if ~isempty(side_idx)
+                        dataset_metrics.activation_similarity_final_by_side_length_ratio(indices(1), indices(2), side_idx, indices(4)) = act_sim_final;
+                    end
 
                     % Calculate demixing score
                     [demixing_score, ~] = computeDemixingMetric(data.Xout{1});
                     dataset_metrics.demixing_score(indices(1), indices(2), indices(3), indices(4)) = demixing_score;
+                    if ~isempty(side_idx)
+                        dataset_metrics.demixing_score_by_side_length_ratio(indices(1), indices(2), side_idx, indices(4)) = demixing_score;
+                    end
                     
                     % Calculate combined score
                     dataset_metrics.combined_activationScore(indices(1), indices(2), indices(3), indices(4)) = ...
                         computeCombined_activationScore(demixing_score, act_sim_final);
+                    if ~isempty(side_idx)
+                        dataset_metrics.combined_activationScore_by_side_length_ratio(indices(1), indices(2), side_idx, indices(4)) = ...
+                            computeCombined_activationScore(demixing_score, act_sim_final);
+                    end
                 end
                 
                 % Load metrics from trajectories
@@ -304,6 +382,11 @@ function print_metrics_summary(metrics)
         length(metrics.theta_cap_values), min(metrics.theta_cap_values), max(metrics.theta_cap_values));
     fprintf('- Nobs: %d values [%.2f to %.2f]\n', ...
         length(metrics.Nobs_values), min(metrics.Nobs_values), max(metrics.Nobs_values));
+    if isfield(metrics, 'side_length_ratio_values') && ~isempty(metrics.side_length_ratio_values)
+        fprintf('- Side-length ratio: %d values [%.3e to %.3e]\n', ...
+            length(metrics.side_length_ratio_values), ...
+            min(metrics.side_length_ratio_values), max(metrics.side_length_ratio_values));
+    end
     
     % Show repetition dimension if it exists
     if isfield(metrics, 'repetition_values')
@@ -312,6 +395,11 @@ function print_metrics_summary(metrics)
         fprintf('- Array dimensions: %d × %d × %d × %d (SNR × theta × N_obs × rep)\n', ...
             length(metrics.SNR_values), length(metrics.theta_cap_values), ...
             length(metrics.Nobs_values), length(metrics.repetition_values));
+        if isfield(metrics, 'side_length_ratio_values') && ~isempty(metrics.side_length_ratio_values)
+            fprintf('- Side-indexed dimensions: %d × %d × %d × %d (SNR × theta × side ratio × rep)\n', ...
+                length(metrics.SNR_values), length(metrics.theta_cap_values), ...
+                length(metrics.side_length_ratio_values), length(metrics.repetition_values));
+        end
     else
         fprintf('- Array dimensions: %d × %d × %d (SNR × theta × N_obs)\n', ...
             length(metrics.SNR_values), length(metrics.theta_cap_values), ...

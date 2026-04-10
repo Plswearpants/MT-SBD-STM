@@ -1,18 +1,60 @@
-function metrics2heat_properGen(dataset_metrics)
+function metrics2heat_properGen(dataset_metrics, mode)
     % Create 3D heatspace visualization for both kernel similarity and combined activation metrics
     % Input:
     %   dataset_metrics: structure containing:
     %       - SNR_values
     %       - theta_cap_values
-    %       - Nobs_values
+    %       - Nobs_values (mode 1)
+    %       - side_length_ratio_values (mode 2, optional)
     %       - repetition_values (optional, for 4D arrays)
     %       - kernel_similarity [SNR × theta_cap × Nobs] or [SNR × theta_cap × Nobs × rep]
     %       - activation_metrics [SNR × theta_cap × Nobs] or [SNR × theta_cap × Nobs × rep]
     % Note: If metrics have a 4th dimension (repetitions), they will be averaged over repetitions
+    %   mode: optional plotting mode
+    %       - "1" (default): [SNR × theta_cap × Nobs]
+    %       - "2": [SNR × theta_cap × side_length_ratio]
+
+    if nargin < 2 || isempty(mode)
+        mode = "1";
+    else
+        mode = string(mode);
+    end
+
+    switch mode
+        case "1"
+            axis3_values = dataset_metrics.Nobs_values;
+            axis3_label = 'N_{obs}';
+            axis3_tick_fmt = '%.0f';
+            kernel_data = dataset_metrics.kernel_quality_final;
+            combined_data = dataset_metrics.combined_activationScore;
+        case "2"
+            if isfield(dataset_metrics, 'side_length_ratio_values')
+                axis3_values = dataset_metrics.side_length_ratio_values;
+            elseif isfield(dataset_metrics, 'area_ratio_values')
+                % Backward-compatible fallback if older field name is used
+                axis3_values = dataset_metrics.area_ratio_values;
+            else
+                error(['mode "2" requires dataset_metrics.side_length_ratio_values ' ...
+                    '(or area_ratio_values for backward compatibility).']);
+            end
+            axis3_label = 'side length ratio';
+            axis3_tick_fmt = '%.3f';
+            if isfield(dataset_metrics, 'kernel_quality_final_by_side_length_ratio') && ...
+               isfield(dataset_metrics, 'combined_activationScore_by_side_length_ratio')
+                kernel_data = dataset_metrics.kernel_quality_final_by_side_length_ratio;
+                combined_data = dataset_metrics.combined_activationScore_by_side_length_ratio;
+            else
+                % Fallback for older loaders: interpret existing tensors with mode-2 axis.
+                kernel_data = dataset_metrics.kernel_quality_final;
+                combined_data = dataset_metrics.combined_activationScore;
+            end
+        otherwise
+            error('Unsupported mode "%s". Use "1" or "2".', mode);
+    end
     
     % Average over repetitions if 4D arrays are present
-    kernel_quality_avg = average_over_repetitions(dataset_metrics.kernel_quality_final);
-    combined_activation_avg = average_over_repetitions(dataset_metrics.combined_activationScore);
+    kernel_quality_avg = average_over_repetitions(kernel_data);
+    combined_activation_avg = average_over_repetitions(combined_data);
     
     % Create figure with two subplots
     figure('Position', [100 100 1600 800]);
@@ -21,29 +63,31 @@ function metrics2heat_properGen(dataset_metrics)
     subplot(1,2,1);
     h1 = plot_3D_heatspace(dataset_metrics.SNR_values, ...
                           dataset_metrics.theta_cap_values, ...
-                          dataset_metrics.Nobs_values, ...
+                          axis3_values, ...
                           kernel_quality_avg, ...
-                          'Kernel Similarity (Averaged over Repetitions)');
+                          'Kernel Similarity (Averaged over Repetitions)', ...
+                          axis3_label, axis3_tick_fmt);
     
     % 2. Combined Activation Score Heatspace
     subplot(1,2,2);
     h2 = plot_3D_heatspace(dataset_metrics.SNR_values, ...
                           dataset_metrics.theta_cap_values, ...
-                          dataset_metrics.Nobs_values, ...
+                          axis3_values, ...
                           combined_activation_avg, ...
-                          'Combined Activation Score (Averaged over Repetitions)');
+                          'Combined Activation Score (Averaged over Repetitions)', ...
+                          axis3_label, axis3_tick_fmt);
 end
 
-function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric_values, title_str)
-    % Create meshgrid matching the data structure: Metric(SNR, theta_cap, Nobs)
-    % The data structure is [SNR, theta_cap, Nobs], so meshgrid should match this
-    [SNR, Theta, Nobs] = meshgrid(SNR_values, theta_cap_values, Nobs_values);
+function h = plot_3D_heatspace(SNR_values, theta_cap_values, axis3_values, metric_values, title_str, axis3_label, axis3_tick_fmt)
+    % Create meshgrid matching the data structure: Metric(SNR, theta_cap, axis3)
+    % The data structure is [SNR, theta_cap, axis3], so meshgrid should match this
+    [SNR, Theta, Axis3] = meshgrid(SNR_values, theta_cap_values, axis3_values);
     
     % Permute the meshgrid to match the data structure dimensions [SNR, theta_cap, Nobs]
-    % Original meshgrid creates [theta_cap, SNR, Nobs], so we need to permute
+    % Original meshgrid creates [theta_cap, SNR, axis3], so we need to permute
     SNR = permute(SNR, [2, 1, 3]);  % Move SNR to first dimension
     Theta = permute(Theta, [2, 1, 3]);  % Move theta_cap to second dimension
-    Nobs = permute(Nobs, [2, 1, 3]);  % Keep Nobs in third dimension
+    Axis3 = permute(Axis3, [2, 1, 3]);  % Keep axis3 in third dimension
     
     % Remap SNR coordinates to evenly spaced positions
     num_snr_values = length(SNR_values);
@@ -64,7 +108,7 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric
     
     % Ensure all inputs are column vectors
     x = Theta(:);   % Column vector for x coordinates (theta_cap)
-    y = Nobs(:);    % Column vector for y coordinates (Nobs)
+    y = Axis3(:);   % Column vector for y coordinates (axis3)
     z = SNR(:);     % Column vector for z coordinates (SNR) - now evenly spaced
     c = metric_values(:);  % Column vector for colors
 
@@ -81,7 +125,7 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric
     
     % Add labels and title
     xlabel('defect density');
-    ylabel('N_{obs}');
+    ylabel(axis3_label);
     zlabel('SNR');
     title(title_str);
     
@@ -96,17 +140,17 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric
     % Make axis labels more readable and set directions
     ax = gca;
     ax.XScale = 'log';  % Theta cap in log scale
-    ax.YScale = 'linear';  % Nobs in linear scale
+    ax.YScale = 'linear';  % axis3 in linear scale
     ax.ZScale = 'linear';  % SNR in linear scale
     
     % Set axis directions
     set(ax, 'XDir', 'normal');   % theta_cap: low -> high
-    set(ax, 'YDir', 'reverse');  % Nobs: high -> low
+    set(ax, 'YDir', 'reverse');  % axis3: high -> low
     set(ax, 'ZDir', 'reverse');  % SNR: high -> low
     
     % Set tick values to match the actual data points
     ax.XTick = theta_cap_values;
-    ax.YTick = Nobs_values;
+    ax.YTick = axis3_values;
     
     % Set SNR tick positions to the evenly spaced positions
     if num_snr_values > 1
@@ -118,7 +162,7 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, Nobs_values, metric
     
     % Format tick labels
     ax.XTickLabel = arrayfun(@(x) sprintf('%.0e', x), theta_cap_values, 'UniformOutput', false);
-    ax.YTickLabel = arrayfun(@(x) sprintf('%.0f', x), Nobs_values, 'UniformOutput', false);
+    ax.YTickLabel = arrayfun(@(x) sprintf(axis3_tick_fmt, x), axis3_values, 'UniformOutput', false);
     
     % Format SNR tick labels to show actual SNR values at evenly spaced positions
     if num_snr_values > 1

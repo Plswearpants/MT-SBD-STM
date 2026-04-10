@@ -5,7 +5,7 @@ run('../init_sbd');
 %% 1. Initial Setup
 % Load LDoS simulation data for kernel selection
 load('example_data/LDoS_single_defects_self=0.6_save.mat');
-
+LDoS_sim = LDoS_result;
 % Display the 3D LDoS data for selection
 fprintf('Displaying 3D LDoS simulation data...\n');
 d3gridDisplay(LDoS_sim, 'dynamic');

@@ -1,25 +1,48 @@
 %% ~~~~~~~~~~~~~ProperGen Results vis~~~~~~~~~~~~~~~~~~~~~
 %% load the metric with properGen results 
-metrics= loadMetricDataset_new();
+metrics = loadMetricDataset_new();
+
+% Global axis-3 mode: 1 = N_obs, 2 = side_length_ratio.
+% Set once here; all downstream visualizations follow this choice.
+axis3_mode = 2; 
 
 %% create heatspace
-metrics2heat_properGen(metrics);
+metrics2heat_properGen(metrics, axis3_mode);
 
 %% fixed density vis
 % For kernel similarity
-metrics2heat_by_defect_density(metrics, 'kernel');
-
-% For combined activation score
-metrics2heat_by_defect_density(metrics, 'combined');
+metrics2heat_by_defect_density(metrics, 'kernel', axis3_mode);
+%% per-SNR 2D heatmaps with linear interpolation (same colormap)
+% Convert designed defect density per lattice site to per pixel^2:
+% rho_pixel2 = rho_lattice / p_scale^2.
+fixed_p_scale = 3;
+metrics2heat_by_snr_interpolated( ...
+    metrics, 'kernel', axis3_mode, 5, fixed_p_scale^2, 'defect density (pixel^{-2})');
 %%
-metrics2heat_by_defect_density(metrics, 'multiplied');
+metrics2heat_by_snr_interpolated( ...
+    metrics, 'combined', axis3_mode, 5, fixed_p_scale^2, 'defect density (pixel^{-2})');
+%% interactive explorer on fixed SNR heatmap (click to inspect nearest dataset)
+explore_snr_heatmap_click(metrics, 5, 'kernel', axis3_mode, 5);
+
+%% For combined activation score
+metrics2heat_by_defect_density(metrics, 'combined', axis3_mode);
+%%
+metrics2heat_by_defect_density(metrics, 'multiplied', axis3_mode);
 %% view detailed dataset
-visualize_heatspace_details_properGen(metrics)
+visualize_heatspace_details_properGen(metrics, axis3_mode)
 
 %% number of defect occurrence vs kernel similarity
 plot_defects_snr_kernel_similarity(metrics);
-%%
+%% number of defect occurrence vs kernel similarity by SNR
 plot_defects_vs_kernel_similarity_by_snr(metrics);
+%% given SNR: occurrence vs side-length ratio (2D scatter)
+plot_occurrence_vs_length_ratio_by_snr(metrics);
+%% Build NOR and LOO vs density metric (filter by SNR and side-length ratio)
+metrics = build_nor_loo_metrics(metrics);
+%% Plot NOR and LOO vs density on given values
+selected_snr = [5];
+selected_side_length_ratio = [0.175];
+[nor_density_axis, nor_curve, loo_curve, nor_loo_curve] = plot_nor_loo_vs_density(metrics, selected_snr, selected_side_length_ratio);
 %% view combined set 
 % Load your 3 different experiment runs
 metrics1 = loadMetricDataset_new();  % First run
@@ -40,7 +63,7 @@ combined_metrics = combine_metrics_for_plotting(dataset_metrics_array);
 
 plot_defects_vs_kernel_similarity_by_snr(combined_metrics);
 %% Plot all runs together using the new function
-metrics2heat_multiple_runs(dataset_metrics_array, run_names);
+metrics2heat_multiple_runs(dataset_metrics_array, run_names, axis3_mode);
 
 %% ~~~~~~~~~~~~~Old Results vis~~~~~~~~~~~~~~~~~~~~~
 %% Load the metrics

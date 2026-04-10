@@ -1,0 +1,45 @@
+---
+description: Axis-3 mode convention for phase-space visualization and analysis functions
+globs: examples/visualize_dataset_metrics.m,Dong_func/phase_space/*.m
+alwaysApply: false
+---
+
+# Axis-3 Mode Convention
+
+All phase-space visualization and analysis functions use a **mode** parameter to select the third axis:
+
+- `mode = 1` → axis-3 is **N_obs** (observation lattice size)
+- `mode = 2` → axis-3 is **side_length_ratio** (2M / N_obs, i.e., kernel-side / observation-side, designed ratio)
+
+## Rules
+
+1. **Single source of truth**: `axis3_mode` is set once in `visualize_dataset_metrics.m` right after `loadMetricDataset_new()`. Every downstream call receives this value — never hardcode mode inside individual functions.
+
+2. **Every function that slices or plots along axis-3 must accept a `mode` parameter** (defaulting to `1` for backward compatibility). Current functions:
+   - `metrics2heat_properGen(metrics, mode)`
+   - `metrics2heat_by_snr_interpolated(metrics, metric_type, mode, interp_factor)`
+   - `metrics2heat_by_defect_density(metrics, metric_type, mode)`
+   - `visualize_heatspace_details_properGen(metrics, mode)`
+   - `metrics2heat_multiple_runs(metrics_array, run_names, mode)`
+
+3. **Mode 2 data source**: In mode 2, read from the `_by_side_length_ratio` suffixed fields (e.g., `kernel_quality_final_by_side_length_ratio`), not from the primary N_obs-indexed arrays. The grid values come from `dataset_metrics.side_length_ratio_values`.
+
+4. **Designed vs actual ratio**: The generation script stores `params.designed_side_length_ratio` (the exact linspace grid value) separately from `params.area_ratio` (the actual 2M/N_obs after rounding). The loader uses the designed ratio for grid indexing to avoid NaN-inflated sparse grids.
+
+5. **When adding a new visualization function** that depends on axis-3, follow this pattern:
+
+```matlab
+function my_new_plot(dataset_metrics, mode)
+    if nargin < 2 || isempty(mode), mode = 1; end
+    switch mode
+        case 1
+            axis3_values = dataset_metrics.Nobs_values;
+            % read from primary arrays
+        case 2
+            axis3_values = dataset_metrics.side_length_ratio_values;
+            % read from *_by_side_length_ratio arrays
+    end
+end
+```
+
+Then wire it in `visualize_dataset_metrics.m` with `axis3_mode`.
