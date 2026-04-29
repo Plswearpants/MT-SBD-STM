@@ -1,6 +1,13 @@
-function dataset_metrics = loadMetricDataset_new()
+function dataset_metrics = loadMetricDataset_new(mode)
     % Initialize storage structure
     dataset_metrics = struct();
+
+    if nargin < 1 || isempty(mode)
+        mode = 1;
+    end
+    if ~(isscalar(mode) && any(mode == [1, 2]))
+        error('mode must be 1 (N_obs axis) or 2 (side_length_ratio axis).');
+    end
     
     % Get folder path from user with error handling
     default_path = fullfile(pwd, 'examples');
@@ -117,17 +124,35 @@ function dataset_metrics = loadMetricDataset_new()
     
     unique_reps = 1:max_rep;  % Repetitions are 1, 2, 3, ..., max_rep
     
-    % Store parameter values
+    % Store parameter values and axis metadata
     dataset_metrics.SNR_values = unique_snr;
     dataset_metrics.theta_cap_values = unique_theta;
-    dataset_metrics.Nobs_values = unique_nobs;
+    if ~isempty(unique_nobs)
+        dataset_metrics.Nobs_values = unique_nobs;
+    end
     if ~isempty(unique_designed_ratio)
         dataset_metrics.side_length_ratio_values = unique_designed_ratio;
     end
     dataset_metrics.repetition_values = unique_reps;
-    
-    % Initialize metric arrays with pre-allocated memory (4D: SNR × theta × N_obs × rep)
-    dims = [length(unique_snr), length(unique_theta), length(unique_nobs), max_rep];
+
+    switch mode
+        case 1
+            axis3_values = unique_nobs;
+            axis3_name = 'N_obs';
+        case 2
+            if isempty(unique_designed_ratio)
+                error(['mode=2 requested, but no side-length ratio grid was found. ' ...
+                       'Cannot index datasets on side_length_ratio axis.']);
+            end
+            axis3_values = unique_designed_ratio;
+            axis3_name = 'side_length_ratio';
+    end
+    dataset_metrics.axis3_mode = mode;
+    dataset_metrics.axis3_name = axis3_name;
+    dataset_metrics.axis3_values = axis3_values;
+
+    % Initialize metric arrays with pre-allocated memory (4D: SNR × theta × axis3 × rep)
+    dims = [length(unique_snr), length(unique_theta), length(axis3_values), max_rep];
     dataset_metrics.kernel_quality_trajectory = cell(dims);
     dataset_metrics.activation_similarity_trajectory = cell(dims);
     dataset_metrics.kernel_quality_final = nan(dims);
@@ -137,15 +162,8 @@ function dataset_metrics = loadMetricDataset_new()
     dataset_metrics.relative_changes = cell(dims);
     dataset_metrics.combined_activationScore = nan(dims);
     dataset_metrics.demixing_score = nan(dims);
-    
-    % Parallel indexing by designed side-length ratio: [SNR × theta × side_length_ratio × rep]
-    if ~isempty(unique_designed_ratio)
-        dims_side = [length(unique_snr), length(unique_theta), length(unique_designed_ratio), max_rep];
-        dataset_metrics.kernel_quality_final_by_side_length_ratio = nan(dims_side);
-        dataset_metrics.activation_similarity_final_by_side_length_ratio = nan(dims_side);
-        dataset_metrics.demixing_score_by_side_length_ratio = nan(dims_side);
-        dataset_metrics.combined_activationScore_by_side_length_ratio = nan(dims_side);
-    end
+    dataset_metrics.Nobs_at_axis3 = nan(dims);
+    dataset_metrics.side_length_ratio_at_axis3 = nan(dims);
     
     % Add storage for reconstruction data
     dataset_metrics.Y = cell(dims);          % Original observations from synthetic data
@@ -169,6 +187,7 @@ function dataset_metrics = loadMetricDataset_new()
     batch_size = 10;
     num_batches = ceil(length(result_files) / batch_size);
     
+    collision_count = 0;
     for batch = 1:num_batches
         start_idx = (batch-1)*batch_size + 1;
         end_idx = min(batch*batch_size, length(result_files));
@@ -247,15 +266,32 @@ function dataset_metrics = loadMetricDataset_new()
             theta_idx = find(abs(unique_theta - theta_val) < 1e-10, 1);
             nobs_idx = find(abs(unique_nobs - nobs_val) < 1e-10, 1);
             rep_idx = rep_val;  % Repetition is already an index (1, 2, 3, ...)
-            side_idx = [];
-            if ~isempty(unique_designed_ratio) && ~isempty(designed_ratio_val)
-                side_idx = find(abs(unique_designed_ratio - designed_ratio_val) < 1e-10, 1);
-            end
             
-            if isempty(snr_idx) || isempty(theta_idx) || isempty(nobs_idx)
+            if isempty(snr_idx) || isempty(theta_idx)
                 warning('Dataset %d: Could not map parameters to indices (SNR=%.2e, theta=%.2e, N_obs=%d), skipping', ...
                     dataset_num, snr_val, theta_val, nobs_val);
                 continue;
+            end
+
+            if mode == 1
+                axis3_idx = nobs_idx;
+                if isempty(axis3_idx)
+                    warning('Dataset %d: Could not map N_obs=%d to axis-3 index, skipping', dataset_num, nobs_val);
+                    continue;
+                end
+            else
+                if isempty(unique_designed_ratio)
+                    warning('Dataset %d: side-length ratio grid unavailable in mode=2, skipping', dataset_num);
+                    continue;
+                end
+                if isempty(designed_ratio_val)
+                    warning('Dataset %d: missing designed/actual side-length ratio, skipping in mode=2', dataset_num);
+                    continue;
+                end
+                axis3_idx = find(abs(unique_designed_ratio - designed_ratio_val) < 1e-10, 1);
+                if isempty(axis3_idx)
+                    [~, axis3_idx] = min(abs(unique_designed_ratio - designed_ratio_val));
+                end
             end
             
             % Validate repetition index
@@ -264,12 +300,16 @@ function dataset_metrics = loadMetricDataset_new()
                 continue;
             end
             
-            indices = [snr_idx, theta_idx, nobs_idx, rep_idx];
+            indices = [snr_idx, theta_idx, axis3_idx, rep_idx];
             
             % Process current dataset
             try
                 % Load result data
                 data = load(fullfile(folder_path, result_files(i).name));
+
+                if ~isempty(dataset_metrics.Aout{indices(1), indices(2), indices(3), indices(4)})
+                    collision_count = collision_count + 1;
+                end
                 
                 % Store original and clean observations (4D indexing)
                 dataset_metrics.Y{indices(1), indices(2), indices(3), indices(4)} = dataset.Y;
@@ -293,6 +333,10 @@ function dataset_metrics = loadMetricDataset_new()
                 if isfield(data, 'bout')
                     dataset_metrics.bout{indices(1), indices(2), indices(3), indices(4)} = data.bout{1};
                 end
+                dataset_metrics.Nobs_at_axis3(indices(1), indices(2), indices(3), indices(4)) = nobs_val;
+                if ~isempty(designed_ratio_val)
+                    dataset_metrics.side_length_ratio_at_axis3(indices(1), indices(2), indices(3), indices(4)) = designed_ratio_val;
+                end
                 
                 % Calculate metrics for original order
                 if isfield(data, 'Xout') && isfield(data, 'dataset_X0') && ...
@@ -305,30 +349,17 @@ function dataset_metrics = loadMetricDataset_new()
                     % Store metrics from original order
                     kernel_quality_final = mean(quality_scores.no_flip.kernel_similarity);
                     dataset_metrics.kernel_quality_final(indices(1), indices(2), indices(3), indices(4)) = kernel_quality_final;
-                    if ~isempty(side_idx)
-                        dataset_metrics.kernel_quality_final_by_side_length_ratio(indices(1), indices(2), side_idx, indices(4)) = kernel_quality_final;
-                    end
 
                     act_sim_final = mean(quality_scores.no_flip.activation_similarity);
                     dataset_metrics.activation_similarity_final(indices(1), indices(2), indices(3), indices(4)) = act_sim_final;
-                    if ~isempty(side_idx)
-                        dataset_metrics.activation_similarity_final_by_side_length_ratio(indices(1), indices(2), side_idx, indices(4)) = act_sim_final;
-                    end
 
                     % Calculate demixing score
                     [demixing_score, ~] = computeDemixingMetric(data.Xout{1});
                     dataset_metrics.demixing_score(indices(1), indices(2), indices(3), indices(4)) = demixing_score;
-                    if ~isempty(side_idx)
-                        dataset_metrics.demixing_score_by_side_length_ratio(indices(1), indices(2), side_idx, indices(4)) = demixing_score;
-                    end
                     
                     % Calculate combined score
                     dataset_metrics.combined_activationScore(indices(1), indices(2), indices(3), indices(4)) = ...
                         computeCombined_activationScore(demixing_score, act_sim_final);
-                    if ~isempty(side_idx)
-                        dataset_metrics.combined_activationScore_by_side_length_ratio(indices(1), indices(2), side_idx, indices(4)) = ...
-                            computeCombined_activationScore(demixing_score, act_sim_final);
-                    end
                 end
                 
                 % Load metrics from trajectories
@@ -369,6 +400,11 @@ function dataset_metrics = loadMetricDataset_new()
         % Display progress
         fprintf('Processed batch %d/%d\n', batch, num_batches);
     end
+
+    if collision_count > 0
+        warning('loadMetricDataset_new:AxisCollisions', ...
+            '%d axis-slot collisions detected; later dataset overwrites earlier entry.', collision_count);
+    end
     
     % Print summary
     print_metrics_summary(dataset_metrics);
@@ -380,30 +416,30 @@ function print_metrics_summary(metrics)
         length(metrics.SNR_values), min(metrics.SNR_values), max(metrics.SNR_values));
     fprintf('- Theta cap: %d values [%.2e to %.2e]\n', ...
         length(metrics.theta_cap_values), min(metrics.theta_cap_values), max(metrics.theta_cap_values));
-    fprintf('- Nobs: %d values [%.2f to %.2f]\n', ...
-        length(metrics.Nobs_values), min(metrics.Nobs_values), max(metrics.Nobs_values));
+    if isfield(metrics, 'Nobs_values') && ~isempty(metrics.Nobs_values)
+        fprintf('- Nobs: %d values [%.2f to %.2f]\n', ...
+            length(metrics.Nobs_values), min(metrics.Nobs_values), max(metrics.Nobs_values));
+    end
     if isfield(metrics, 'side_length_ratio_values') && ~isempty(metrics.side_length_ratio_values)
         fprintf('- Side-length ratio: %d values [%.3e to %.3e]\n', ...
             length(metrics.side_length_ratio_values), ...
             min(metrics.side_length_ratio_values), max(metrics.side_length_ratio_values));
+    end
+    if isfield(metrics, 'axis3_mode')
+        fprintf('- Axis-3 mode: %d (%s)\n', metrics.axis3_mode, metrics.axis3_name);
     end
     
     % Show repetition dimension if it exists
     if isfield(metrics, 'repetition_values')
         fprintf('- Repetitions: %d values [%d to %d]\n', ...
             length(metrics.repetition_values), min(metrics.repetition_values), max(metrics.repetition_values));
-        fprintf('- Array dimensions: %d × %d × %d × %d (SNR × theta × N_obs × rep)\n', ...
+        fprintf('- Array dimensions: %d × %d × %d × %d (SNR × theta × axis3 × rep)\n', ...
             length(metrics.SNR_values), length(metrics.theta_cap_values), ...
-            length(metrics.Nobs_values), length(metrics.repetition_values));
-        if isfield(metrics, 'side_length_ratio_values') && ~isempty(metrics.side_length_ratio_values)
-            fprintf('- Side-indexed dimensions: %d × %d × %d × %d (SNR × theta × side ratio × rep)\n', ...
-                length(metrics.SNR_values), length(metrics.theta_cap_values), ...
-                length(metrics.side_length_ratio_values), length(metrics.repetition_values));
-        end
+            length(metrics.axis3_values), length(metrics.repetition_values));
     else
-        fprintf('- Array dimensions: %d × %d × %d (SNR × theta × N_obs)\n', ...
+        fprintf('- Array dimensions: %d × %d × %d (SNR × theta × axis3)\n', ...
             length(metrics.SNR_values), length(metrics.theta_cap_values), ...
-            length(metrics.Nobs_values));
+            length(metrics.axis3_values));
     end
     
     % Add summary of stored reconstruction data

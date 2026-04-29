@@ -1,0 +1,31 @@
+To test how widely the algorithm can be applied successfully, we developed a physically informed simulation platform and a metric system that defines success; These allowed us to benchmark the performance across noise level, defect density, and the kernel-observation size ratio. It is natural to define success through a direct comparison between the output activation map $\mathrm{X_i^{out}}$, kernel $\mathrm{A_i^{out}}$, and their ground truth inputs $\mathrm{X_i^{gt}}$, $\mathrm{A_i^{gt}}$. For an observation with $k$ channels, we first define an activation score (AS) as: 
+
+\begin{align}
+    &\text{AS} = \big(\sum_{i=1}^k \operatorname{cos_{sim}}(\mathrm{X_i^{out}},\mathrm{X_i^{gt}}) \big) \cdot \big(1-\frac{1}{k(k+1)}\sum_{j\neq i} \operatorname{IoU}(\mathrm{X_i^{out}},\mathrm{X_j^{out}})\big),
+\end{align}
+Here, $\operatorname{cos_{sim}}$ and $\operatorname{IoU}$ denote cosine similarity and Intersection-over-Union, respectively:
+\begin{align}
+    \operatorname{cos_{sim}}\!\left(X_i^{\mathrm{out}},X_i^{\mathrm{gt}}\right)
+    &= \frac{\left\langle X_i^{\mathrm{out}},X_i^{\mathrm{gt}}\right\rangle_F}
+    {\left\|X_i^{\mathrm{out}}\right\|_F\left\|X_i^{\mathrm{gt}}\right\|_F},\\
+    \operatorname{IoU}\!\left(X_i^{\mathrm{out}},X_j^{\mathrm{out}}\right)
+    &= \frac{\sum\limits_{p}\min\!\left(\widetilde{X}_i^{\mathrm{out}}(p),\widetilde{X}_j^{\mathrm{out}}(p)\right)}
+    {\sum\limits_{p}\max\!\left(\widetilde{X}_i^{\mathrm{out}}(p),\widetilde{X}_j^{\mathrm{out}}(p)\right)+\varepsilon},
+\end{align}
+where $\langle \cdot,\cdot\rangle_F$ and $\|\cdot\|_F$ are the Frobenius inner product and norm, $p$ indexes pixels, and $\widetilde{X}$ denotes map-wise normalized activations (to $[0,1]$) used in overlap evaluation. 
+
+Using both terms is necessary because they probe complementary failure modes. The cosine-similarity term measures whether each recovered channel reproduces the correct spatial pattern and amplitude distribution of its own ground truth map. However, a high per-channel cosine similarity alone does not guarantee that different recovered channels are well separated: two channels can each look individually plausible while still sharing substantial support. The IoU-based demixing term explicitly penalizes inter-channel overlap in $\{X_i^{\mathrm{out}}\}$, enforcing channel exclusivity. In our physical setting, overlap between different channel activations is forbidden, so this IoU penalty is intentionally strict and should strongly suppress overlapping solutions. Their product therefore rewards reconstructions that are simultaneously accurate (high channel-wise agreement) and interpretable (low cross-channel mixing).
+
+For kernel-space quality, we define a kernel similarity score (KS) by comparing reconstructed and ground-truth kernels in reciprocal ($q$) space. For each channel $i$, we first compute the QPI magnitude map
+\begin{align}
+    Q\!\left(A_i\right)=\left|\operatorname{fftshift}\!\left(\operatorname{fft2}\!\left(A_i\right)\right)\right|,
+\end{align}
+then normalize by its maximum value and evaluate a 2D correlation coefficient:
+\begin{align}
+    \widetilde{Q}\!\left(A_i\right) &= \frac{Q\!\left(A_i\right)}{\max\!\big(Q\!\left(A_i\right)\big)},\\
+    \mathrm{KS}_i &= \operatorname{corr2}\!\left(\widetilde{Q}\!\left(A_i^{\mathrm{out}}\right),\,\widetilde{Q}\!\left(A_i^{\mathrm{gt}}\right)\right).
+\end{align}
+The final kernel similarity for a $k$-channel observation is the channel average:
+\begin{align}
+    \mathrm{KS} = \frac{1}{k}\sum_{i=1}^{k}\mathrm{KS}_i.
+\end{align}

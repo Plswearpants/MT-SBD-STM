@@ -21,8 +21,8 @@ function metrics2heat_multiple_runs(dataset_metrics_array, run_names, mode)
     
     % Select metric field names based on mode
     if mode == 2
-        kernel_field = 'kernel_quality_final_by_side_length_ratio';
-        combined_field = 'combined_activationScore_by_side_length_ratio';
+        kernel_field = 'kernel_quality_final';
+        combined_field = 'combined_activationScore';
         axis3_source = 'side_length_ratio_values';
         axis3_label = 'side length ratio';
         axis3_tick_fmt = '%.3f';
@@ -87,11 +87,12 @@ function h = plot_3D_heatspace_multiple(dataset_metrics_array, run_names, metric
     for run_idx = 1:length(dataset_metrics_array)
         metrics = dataset_metrics_array{run_idx};
         
-        if ~isfield(metrics, metric_field)
-            warning('Field %s not found in run %d', metric_field, run_idx);
+        resolved_metric_field = resolve_metric_field(metrics, metric_field, mode);
+        if isempty(resolved_metric_field)
+            warning('Field %s (mode=%d) not found in run %d', metric_field, mode, run_idx);
             continue;
         end
-        run_metric = average_over_reps(metrics.(metric_field));
+        run_metric = average_over_reps(metrics.(resolved_metric_field));
         
         run_axis3 = metrics.(axis3_source);
         
@@ -154,8 +155,7 @@ function h = plot_3D_heatspace_multiple(dataset_metrics_array, run_names, metric
     hold off;
     
     try
-        cmap_data = load('metric_colormapv2.mat');
-        colormap(cmap_data.CustomColormap);
+        colormap(slanCM('viridis'));
     catch
         colormap('parula');
     end
@@ -175,7 +175,6 @@ function h = plot_3D_heatspace_multiple(dataset_metrics_array, run_names, metric
     ylabel(cb, 'Performance Score');
     
     ax = gca;
-    ax.XScale = 'log';
     ax.YScale = 'linear';
     ax.ZScale = 'linear';
     
@@ -183,7 +182,6 @@ function h = plot_3D_heatspace_multiple(dataset_metrics_array, run_names, metric
     set(ax, 'YDir', 'reverse');
     set(ax, 'ZDir', 'reverse');
     
-    ax.XTick = unique_theta;
     ax.YTick = unique_axis3;
     
     if num_snr_values > 1
@@ -195,13 +193,35 @@ function h = plot_3D_heatspace_multiple(dataset_metrics_array, run_names, metric
         ax.ZTickLabel = arrayfun(@(x) sprintf('%.1f', x), unique_snr, 'UniformOutput', false);
     end
     
-    ax.XTickLabel = arrayfun(@(x) sprintf('%.0e', x), unique_theta, 'UniformOutput', false);
+    apply_defect_density_tick_style(ax, unique_theta);
     ax.YTickLabel = arrayfun(@(x) sprintf(axis3_tick_fmt, x), unique_axis3, 'UniformOutput', false);
-    
-    ax.XTickLabelRotation = 90;
+
     axis square;
     ax.TickLength = [0.02 0.02];
     ax.FontSize = 15;
+end
+
+function field_name = resolve_metric_field(metrics, base_field, mode)
+    field_name = '';
+    loader_mode = get_loader_axis_mode(metrics);
+    if mode == 2 && loader_mode ~= 2
+        legacy = [base_field '_by_side_length_ratio'];
+        if isfield(metrics, legacy)
+            field_name = legacy;
+            return;
+        end
+    end
+    if isfield(metrics, base_field)
+        field_name = base_field;
+    end
+end
+
+function mode = get_loader_axis_mode(metrics)
+    if isfield(metrics, 'axis3_mode') && isscalar(metrics.axis3_mode)
+        mode = metrics.axis3_mode;
+    else
+        mode = 1;
+    end
 end
 
 function avg_data = average_over_reps(data)

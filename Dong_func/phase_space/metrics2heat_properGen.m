@@ -20,13 +20,21 @@ function metrics2heat_properGen(dataset_metrics, mode)
         mode = string(mode);
     end
 
+    loader_mode = get_loader_axis_mode(dataset_metrics);
     switch mode
         case "1"
             axis3_values = dataset_metrics.Nobs_values;
             axis3_label = 'N_{obs}';
             axis3_tick_fmt = '%.0f';
-            kernel_data = dataset_metrics.kernel_quality_final;
-            combined_data = dataset_metrics.combined_activationScore;
+            if loader_mode == 1
+                kernel_data = dataset_metrics.kernel_quality_final;
+                combined_data = dataset_metrics.combined_activationScore;
+            elseif isfield(dataset_metrics, 'kernel_quality_final_by_side_length_ratio') && ...
+                   isfield(dataset_metrics, 'combined_activationScore_by_side_length_ratio')
+                error('Requested mode=1, but metrics were loaded in mode=2 without N_obs tensors.');
+            else
+                error('Requested mode=1, but dataset axis is mode=2. Reload with loadMetricDataset_new(1).');
+            end
         case "2"
             if isfield(dataset_metrics, 'side_length_ratio_values')
                 axis3_values = dataset_metrics.side_length_ratio_values;
@@ -39,14 +47,15 @@ function metrics2heat_properGen(dataset_metrics, mode)
             end
             axis3_label = 'side length ratio';
             axis3_tick_fmt = '%.3f';
-            if isfield(dataset_metrics, 'kernel_quality_final_by_side_length_ratio') && ...
-               isfield(dataset_metrics, 'combined_activationScore_by_side_length_ratio')
+            if loader_mode == 2
+                kernel_data = dataset_metrics.kernel_quality_final;
+                combined_data = dataset_metrics.combined_activationScore;
+            elseif isfield(dataset_metrics, 'kernel_quality_final_by_side_length_ratio') && ...
+                   isfield(dataset_metrics, 'combined_activationScore_by_side_length_ratio')
                 kernel_data = dataset_metrics.kernel_quality_final_by_side_length_ratio;
                 combined_data = dataset_metrics.combined_activationScore_by_side_length_ratio;
             else
-                % Fallback for older loaders: interpret existing tensors with mode-2 axis.
-                kernel_data = dataset_metrics.kernel_quality_final;
-                combined_data = dataset_metrics.combined_activationScore;
+                error('Requested mode=2, but dataset axis is mode=1 and no side-ratio tensors are available.');
             end
         otherwise
             error('Unsupported mode "%s". Use "1" or "2".', mode);
@@ -76,6 +85,14 @@ function metrics2heat_properGen(dataset_metrics, mode)
                           combined_activation_avg, ...
                           'Combined Activation Score (Averaged over Repetitions)', ...
                           axis3_label, axis3_tick_fmt);
+end
+
+function loader_mode = get_loader_axis_mode(dataset_metrics)
+    if isfield(dataset_metrics, 'axis3_mode') && isscalar(dataset_metrics.axis3_mode)
+        loader_mode = dataset_metrics.axis3_mode;
+    else
+        loader_mode = 1;
+    end
 end
 
 function h = plot_3D_heatspace(SNR_values, theta_cap_values, axis3_values, metric_values, title_str, axis3_label, axis3_tick_fmt)
@@ -115,9 +132,12 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, axis3_values, metri
     % Create scatter plot with color based on metric values
     h = scatter3(x, y, z, 100, c, 'filled');
     
-    % Load custom colormap
-    cmap_data = load('metric_colormapv3.mat');
-    colormap(cmap_data.CustomColormap);
+    % Default phase-space colormap
+    try
+        colormap(slanCM('viridis'));
+    catch
+        colormap('parula');
+    end
     
     % Customize appearance
     colorbar;
@@ -149,7 +169,6 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, axis3_values, metri
     set(ax, 'ZDir', 'reverse');  % SNR: high -> low
     
     % Set tick values to match the actual data points
-    ax.XTick = theta_cap_values;
     ax.YTick = axis3_values;
     
     % Set SNR tick positions to the evenly spaced positions
@@ -161,7 +180,7 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, axis3_values, metri
     end
     
     % Format tick labels
-    ax.XTickLabel = arrayfun(@(x) sprintf('%.0e', x), theta_cap_values, 'UniformOutput', false);
+    apply_defect_density_tick_style(ax, theta_cap_values);
     ax.YTickLabel = arrayfun(@(x) sprintf(axis3_tick_fmt, x), axis3_values, 'UniformOutput', false);
     
     % Format SNR tick labels to show actual SNR values at evenly spaced positions
@@ -173,8 +192,7 @@ function h = plot_3D_heatspace(SNR_values, theta_cap_values, axis3_values, metri
         ax.ZTickLabel = arrayfun(@(x) sprintf('%.1f', x), SNR_values, 'UniformOutput', false);
     end
     
-    % Rotate x-axis labels for better readability
-    ax.XTickLabelRotation = 45;
+    % Keep defect-density tick styling consistent across phase-space plots.
 end
 
 function avg_data = average_over_repetitions(data)

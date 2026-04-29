@@ -129,10 +129,9 @@ function [side_ratio_points, occurrence_points, kernel_similarity_points, combin
         return;
     end
 
-    cmap_data = load('metric_colormapv3.mat');
-    if isfield(cmap_data, 'CustomColormap')
-        custom_cmap = cmap_data.CustomColormap;
-    else
+    try
+        custom_cmap = slanCM('viridis');
+    catch
         custom_cmap = parula(256);
     end
 

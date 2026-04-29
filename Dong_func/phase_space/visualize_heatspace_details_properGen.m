@@ -2,6 +2,7 @@ function visualize_heatspace_details_properGen(dataset_metrics, mode)
     if nargin < 2 || isempty(mode)
         mode = 1;
     end
+    loader_mode = get_loader_axis_mode(dataset_metrics);
 
     % Show reference heatspace with the chosen mode
     metrics2heat_properGen(dataset_metrics, mode);
@@ -49,18 +50,22 @@ function visualize_heatspace_details_properGen(dataset_metrics, mode)
         rep = 1;
     end
     
-    % Map inputs to indices in the primary [SNR × theta × N_obs × rep] arrays
+    % Map inputs to indices in the primary [SNR × theta × axis3 × rep] arrays
     [~, theta_idx] = min(abs(dataset_metrics.theta_cap_values - theta_cap));
     [~, snr_idx] = min(abs(dataset_metrics.SNR_values - snr));
 
+    axis_idx = [];
     if ~isempty(nobs_input)
-        [~, nobs_idx] = min(abs(dataset_metrics.Nobs_values - nobs_input));
+        [~, axis_idx] = min(abs(dataset_metrics.Nobs_values - nobs_input));
     else
-        % Mode 2: resolve side_length_ratio → nearest populated N_obs for this SNR.
-        % Scan the N_obs dimension for the first non-empty entry at this (snr, theta, *, rep).
-        nobs_idx = resolve_nobs_from_side_ratio(dataset_metrics, snr_idx, theta_idx, side_idx, rep);
-        if isempty(nobs_idx)
-            error('No reconstruction data found for the selected (SNR, density, side-length ratio) combination.');
+        if loader_mode == 2
+            axis_idx = side_idx;
+        else
+            % Legacy mode-1 payload: side_length_ratio -> nearest populated N_obs
+            axis_idx = resolve_nobs_from_side_ratio(dataset_metrics, snr_idx, theta_idx, side_idx, rep);
+            if isempty(axis_idx)
+                error('No reconstruction data found for the selected (SNR, density, side-length ratio) combination.');
+            end
         end
     end
     
@@ -75,7 +80,12 @@ function visualize_heatspace_details_properGen(dataset_metrics, mode)
     fprintf('\nUsing nearest available parameters:\n');
     fprintf('Theta Cap: %.2e\n', dataset_metrics.theta_cap_values(theta_idx));
     fprintf('SNR: %.1f\n', dataset_metrics.SNR_values(snr_idx));
-    fprintf('Nobs: %.0f\n', dataset_metrics.Nobs_values(nobs_idx));
+    if loader_mode == 2 && isfield(dataset_metrics, 'Nobs_at_axis3')
+        nobs_val = dataset_metrics.Nobs_at_axis3(snr_idx, theta_idx, axis_idx, rep_idx);
+        fprintf('Nobs: %.0f\n', nobs_val);
+    else
+        fprintf('Nobs: %.0f\n', dataset_metrics.Nobs_values(axis_idx));
+    end
     if ~isempty(ratio_input)
         fprintf('Side-length ratio (requested): %.4f\n', dataset_metrics.side_length_ratio_values(side_idx));
     end
@@ -86,26 +96,26 @@ function visualize_heatspace_details_properGen(dataset_metrics, mode)
     % Extract data for the selected point (handle both 3D and 4D indexing)
     if has_repetitions && ndims(dataset_metrics.Y) == 4
         % 4D indexing: [SNR × theta × N_obs × rep]
-        Y = dataset_metrics.Y{snr_idx, theta_idx, nobs_idx, rep_idx};
-        Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, nobs_idx, rep_idx};
-        A0 = dataset_metrics.A0{snr_idx, theta_idx, nobs_idx, rep_idx};
-        A0_noiseless = dataset_metrics.A0_noiseless{snr_idx, theta_idx, nobs_idx, rep_idx};
-        X0 = dataset_metrics.X0{snr_idx, theta_idx, nobs_idx, rep_idx};
-        Aout = dataset_metrics.Aout{snr_idx, theta_idx, nobs_idx, rep_idx};
-        Xout = dataset_metrics.Xout{snr_idx, theta_idx, nobs_idx, rep_idx};
-        bout = dataset_metrics.bout{snr_idx, theta_idx, nobs_idx, rep_idx};
-        extras = dataset_metrics.extras{snr_idx, theta_idx, nobs_idx, rep_idx};
+        Y = dataset_metrics.Y{snr_idx, theta_idx, axis_idx, rep_idx};
+        Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, axis_idx, rep_idx};
+        A0 = dataset_metrics.A0{snr_idx, theta_idx, axis_idx, rep_idx};
+        A0_noiseless = dataset_metrics.A0_noiseless{snr_idx, theta_idx, axis_idx, rep_idx};
+        X0 = dataset_metrics.X0{snr_idx, theta_idx, axis_idx, rep_idx};
+        Aout = dataset_metrics.Aout{snr_idx, theta_idx, axis_idx, rep_idx};
+        Xout = dataset_metrics.Xout{snr_idx, theta_idx, axis_idx, rep_idx};
+        bout = dataset_metrics.bout{snr_idx, theta_idx, axis_idx, rep_idx};
+        extras = dataset_metrics.extras{snr_idx, theta_idx, axis_idx, rep_idx};
     else
         % 3D indexing: [SNR × theta × N_obs] (backward compatibility)
-        Y = dataset_metrics.Y{snr_idx, theta_idx, nobs_idx};
-        Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, nobs_idx};
-        A0 = dataset_metrics.A0{snr_idx, theta_idx, nobs_idx};
-        A0_noiseless = dataset_metrics.A0_noiseless{snr_idx, theta_idx, nobs_idx};
-        X0 = dataset_metrics.X0{snr_idx, theta_idx, nobs_idx};
-        Aout = dataset_metrics.Aout{snr_idx, theta_idx, nobs_idx};
-        Xout = dataset_metrics.Xout{snr_idx, theta_idx, nobs_idx};
-        bout = dataset_metrics.bout{snr_idx, theta_idx, nobs_idx};
-        extras = dataset_metrics.extras{snr_idx, theta_idx, nobs_idx};
+        Y = dataset_metrics.Y{snr_idx, theta_idx, axis_idx};
+        Y_clean = dataset_metrics.Y_clean{snr_idx, theta_idx, axis_idx};
+        A0 = dataset_metrics.A0{snr_idx, theta_idx, axis_idx};
+        A0_noiseless = dataset_metrics.A0_noiseless{snr_idx, theta_idx, axis_idx};
+        X0 = dataset_metrics.X0{snr_idx, theta_idx, axis_idx};
+        Aout = dataset_metrics.Aout{snr_idx, theta_idx, axis_idx};
+        Xout = dataset_metrics.Xout{snr_idx, theta_idx, axis_idx};
+        bout = dataset_metrics.bout{snr_idx, theta_idx, axis_idx};
+        extras = dataset_metrics.extras{snr_idx, theta_idx, axis_idx};
     end
     
     % Check if data exists for this point
@@ -127,16 +137,16 @@ function visualize_heatspace_details_properGen(dataset_metrics, mode)
     if has_repetitions && ndims(dataset_metrics.kernel_quality_final) == 4
         % Show metrics for this specific repetition
         fprintf('Kernel Quality Score(to noiseless GT): %.3f (Repetition %d)\n', ...
-            dataset_metrics.kernel_quality_final(snr_idx, theta_idx, nobs_idx, rep_idx), rep_actual);
+            dataset_metrics.kernel_quality_final(snr_idx, theta_idx, axis_idx, rep_idx), rep_actual);
         fprintf('Activation Similarity Score: %.3f (Repetition %d)\n', ...
-            dataset_metrics.activation_similarity_final(snr_idx, theta_idx, nobs_idx, rep_idx), rep_actual);
+            dataset_metrics.activation_similarity_final(snr_idx, theta_idx, axis_idx, rep_idx), rep_actual);
         fprintf('Combined Activation Score: %.3f (Repetition %d)\n', ...
-            dataset_metrics.combined_activationScore(snr_idx, theta_idx, nobs_idx, rep_idx), rep_actual);
+            dataset_metrics.combined_activationScore(snr_idx, theta_idx, axis_idx, rep_idx), rep_actual);
         
         % Also show average over all repetitions
-        rep_slice_kernel = dataset_metrics.kernel_quality_final(snr_idx, theta_idx, nobs_idx, :);
-        rep_slice_activation = dataset_metrics.activation_similarity_final(snr_idx, theta_idx, nobs_idx, :);
-        rep_slice_combined = dataset_metrics.combined_activationScore(snr_idx, theta_idx, nobs_idx, :);
+        rep_slice_kernel = dataset_metrics.kernel_quality_final(snr_idx, theta_idx, axis_idx, :);
+        rep_slice_activation = dataset_metrics.activation_similarity_final(snr_idx, theta_idx, axis_idx, :);
+        rep_slice_combined = dataset_metrics.combined_activationScore(snr_idx, theta_idx, axis_idx, :);
         avg_kernel = mean(rep_slice_kernel(:), 'omitnan');
         avg_activation = mean(rep_slice_activation(:), 'omitnan');
         avg_combined = mean(rep_slice_combined(:), 'omitnan');
@@ -147,11 +157,11 @@ function visualize_heatspace_details_properGen(dataset_metrics, mode)
     else
         % 3D indexing (backward compatibility)
         fprintf('Kernel Quality Score(to noiseless GT): %.3f\n', ...
-            dataset_metrics.kernel_quality_final(snr_idx, theta_idx, nobs_idx));
+            dataset_metrics.kernel_quality_final(snr_idx, theta_idx, axis_idx));
         fprintf('Activation Similarity Score: %.3f\n', ...
-            dataset_metrics.activation_similarity_final(snr_idx, theta_idx, nobs_idx));
+            dataset_metrics.activation_similarity_final(snr_idx, theta_idx, axis_idx));
         fprintf('Combined Activation Score: %.3f\n', ...
-            dataset_metrics.combined_activationScore(snr_idx, theta_idx, nobs_idx));
+            dataset_metrics.combined_activationScore(snr_idx, theta_idx, axis_idx));
     end
     fprintf('Demixing Score: %.4f\n', demix_score);
     
@@ -176,6 +186,14 @@ function visualize_heatspace_details_properGen(dataset_metrics, mode)
             act_traj = extras.phase1.activation_metrics;
             fprintf('Final Activation Similarity: %.3f\n', act_traj(end));
         end
+    end
+end
+
+function loader_mode = get_loader_axis_mode(dataset_metrics)
+    if isfield(dataset_metrics, 'axis3_mode') && isscalar(dataset_metrics.axis3_mode)
+        loader_mode = dataset_metrics.axis3_mode;
+    else
+        loader_mode = 1;
     end
 end
 

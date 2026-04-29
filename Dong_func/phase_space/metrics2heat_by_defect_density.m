@@ -13,13 +13,14 @@ function metrics2heat_by_defect_density(dataset_metrics, metric_type, mode)
     if nargin < 3 || isempty(mode)
         mode = 1;
     end
+    loader_mode = get_loader_axis_mode(dataset_metrics);
     
     switch mode
         case 1
             axis3_values = dataset_metrics.Nobs_values;
             axis3_label = 'N_{obs}';
             axis3_tick_fmt = '%.0f';
-            [metric_data, metric_name] = get_metric_data(dataset_metrics, metric_type, false);
+            [metric_data, metric_name] = get_metric_data(dataset_metrics, metric_type, false, loader_mode);
         case 2
             if ~isfield(dataset_metrics, 'side_length_ratio_values') || isempty(dataset_metrics.side_length_ratio_values)
                 error('mode=2 requires dataset_metrics.side_length_ratio_values.');
@@ -27,7 +28,7 @@ function metrics2heat_by_defect_density(dataset_metrics, metric_type, mode)
             axis3_values = dataset_metrics.side_length_ratio_values;
             axis3_label = 'side length ratio';
             axis3_tick_fmt = '%.3f';
-            [metric_data, metric_name] = get_metric_data(dataset_metrics, metric_type, true);
+            [metric_data, metric_name] = get_metric_data(dataset_metrics, metric_type, true, loader_mode);
         otherwise
             error('mode must be 1 (Nobs) or 2 (side_length_ratio).');
     end
@@ -55,26 +56,48 @@ function metrics2heat_by_defect_density(dataset_metrics, metric_type, mode)
         'FontSize', 14, 'FontWeight', 'bold');
 end
 
-function [metric_data, metric_name] = get_metric_data(dataset_metrics, metric_type, use_side)
+function [metric_data, metric_name] = get_metric_data(dataset_metrics, metric_type, use_side, loader_mode)
     suffix = '';
-    if use_side
+    if use_side && loader_mode ~= 2
         suffix = '_by_side_length_ratio';
     end
     
     switch lower(metric_type)
         case 'kernel'
-            metric_data = average_over_repetitions(dataset_metrics.(['kernel_quality_final' suffix]));
+            metric_data = average_over_repetitions(select_field(dataset_metrics, ...
+                ['kernel_quality_final' suffix], 'kernel_quality_final'));
             metric_name = 'Kernel Similarity';
         case 'combined'
-            metric_data = average_over_repetitions(dataset_metrics.(['combined_activationScore' suffix]));
+            metric_data = average_over_repetitions(select_field(dataset_metrics, ...
+                ['combined_activationScore' suffix], 'combined_activationScore'));
             metric_name = 'Combined Activation Score';
         case 'multiplied'
-            k = average_over_repetitions(dataset_metrics.(['kernel_quality_final' suffix]));
-            a = average_over_repetitions(dataset_metrics.(['activation_similarity_final' suffix]));
+            k = average_over_repetitions(select_field(dataset_metrics, ...
+                ['kernel_quality_final' suffix], 'kernel_quality_final'));
+            a = average_over_repetitions(select_field(dataset_metrics, ...
+                ['activation_similarity_final' suffix], 'activation_similarity_final'));
             metric_data = k .* a;
             metric_name = 'Kernel \times Activation';
         otherwise
             error('metric_type must be ''kernel'', ''combined'', or ''multiplied''.');
+    end
+end
+
+function data = select_field(metrics, preferred_name, fallback_name)
+    if isfield(metrics, preferred_name)
+        data = metrics.(preferred_name);
+    elseif isfield(metrics, fallback_name)
+        data = metrics.(fallback_name);
+    else
+        error('Missing metric field(s): %s and %s', preferred_name, fallback_name);
+    end
+end
+
+function loader_mode = get_loader_axis_mode(dataset_metrics)
+    if isfield(dataset_metrics, 'axis3_mode') && isscalar(dataset_metrics.axis3_mode)
+        loader_mode = dataset_metrics.axis3_mode;
+    else
+        loader_mode = 1;
     end
 end
 
@@ -85,8 +108,7 @@ function h = plot_2D_slice(SNR_values, axis3_values, metric_slice, title_str, ax
     set(gca, 'YDir', 'normal');
     
     try
-        cmap_data = load('metric_colormapv3.mat');
-        colormap(cmap_data.CustomColormap);
+        colormap(slanCM('viridis'));
     catch
         colormap('parula');
     end

@@ -1,11 +1,25 @@
 %% ~~~~~~~~~~~~~ProperGen Results vis~~~~~~~~~~~~~~~~~~~~~
-%% load the metric with properGen results 
-metrics = loadMetricDataset_new();
-
 % Global axis-3 mode: 1 = N_obs, 2 = side_length_ratio.
 % Set once here; all downstream visualizations follow this choice.
 axis3_mode = 2; 
+%% load the metric with properGen results 
+metrics = loadMetricDataset_new(axis3_mode);
+%% Build the observation fidelity 
+metrics =build_observation_fidelity_metrics(metrics, axis3_mode);
 
+%% Build the normalized kernel similarity 
+metrics = build_normalized_kernel_similarity(metrics);
+
+%% Generalized heatspace plot
+metrics2heat_general(metrics, 2);
+
+%% Line profile draw on metric heatspace
+metrics2heat_general(metrics, 2, ...
+    'plot_mode', 'line_profile', ...
+    'metric_type', 'combined', ...
+    'snr_value', 5, ...
+    'interp_factor', 1, ...
+    'manual_colormap', slanCM('viridis'));
 %% create heatspace
 metrics2heat_properGen(metrics, axis3_mode);
 
@@ -13,16 +27,19 @@ metrics2heat_properGen(metrics, axis3_mode);
 % For kernel similarity
 metrics2heat_by_defect_density(metrics, 'kernel', axis3_mode);
 %% per-SNR 2D heatmaps with linear interpolation (same colormap)
-% Convert designed defect density per lattice site to per pixel^2:
-% rho_pixel2 = rho_lattice / p_scale^2.
-fixed_p_scale = 3;
 metrics2heat_by_snr_interpolated( ...
-    metrics, 'kernel', axis3_mode, 5, fixed_p_scale^2, 'defect density (pixel^{-2})');
+    metrics, 'kernel', axis3_mode, 5);
+%% per-SNR baseline heatmaps for kernel similarity normalization
+metric_colormap = slanCM('viridis');
+contour_levels =[0.95,0.85];
+
+metrics2heat_by_snr_interpolated( ...
+    metrics, 'kernel', axis3_mode, 5, metric_colormap, contour_levels);
 %%
 metrics2heat_by_snr_interpolated( ...
-    metrics, 'combined', axis3_mode, 5, fixed_p_scale^2, 'defect density (pixel^{-2})');
+    metrics, 'combined', axis3_mode, 5, metric_colormap, contour_levels);
 %% interactive explorer on fixed SNR heatmap (click to inspect nearest dataset)
-explore_snr_heatmap_click(metrics, 5, 'kernel', axis3_mode, 5);
+explore_snr_heatmap_click(metrics, 5, 'combined', axis3_mode, 1);
 
 %% For combined activation score
 metrics2heat_by_defect_density(metrics, 'combined', axis3_mode);
@@ -45,9 +62,9 @@ selected_side_length_ratio = [0.175];
 [nor_density_axis, nor_curve, loo_curve, nor_loo_curve] = plot_nor_loo_vs_density(metrics, selected_snr, selected_side_length_ratio);
 %% view combined set 
 % Load your 3 different experiment runs
-metrics1 = loadMetricDataset_new();  % First run
-metrics2 = loadMetricDataset_new();  % Second run  
-metrics3 = loadMetricDataset_new();  % Third run
+metrics1 = loadMetricDataset_new(1);  % First run (combine_metrics_for_plotting expects N_obs axis)
+metrics2 = loadMetricDataset_new(1);  % Second run  
+metrics3 = loadMetricDataset_new(1);  % Third run
 
 % Create cell array of metrics
 dataset_metrics_array = {metrics1, metrics2, metrics3};

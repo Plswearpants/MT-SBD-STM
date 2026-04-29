@@ -90,9 +90,25 @@ for i = 1:size(Y_rec_show_Full,3)
     Y_rec_show_Full(:,:,i) = mat2gray(Y_rec_show_Full(:,:,i));
     qpi_Y_rec_show_Full(:,:,i) = 1-mat2gray(qpi_Y_rec_show_Full(:,:,i),[0,1]);
 end
+%% Figure 3 - Phase space and examples of synthetic data 
+% Layout: first row: panel a) b) being the activation combined metric and
+% the kernel similarity metric of SNR =5. The colormap should be viridis
+% and we plot contour of 0.95(in the color map, the map is 
+% normalized to 0-1) on the activation combined, and then overlay that 
+% countour onto panel b) indicating the working/failure region. 
+
+%fig3_loaded = load('snr=3,5,7.mat');
+metric_colormap = slanCM('viridis');
+contour_levels =[0.95];
+axis3_mode = 2;
+
+metrics2heat_by_snr_interpolated(metrics, 'combined', axis3_mode, 1, metric_colormap, contour_levels);
+% Overlay on your kernel plot for matching SNR index s:
+
+metrics2heat_by_snr_interpolated(metrics, 'kernel', axis3_mode, 1, metric_colormap,contour_levels);
 
 %% Plot figure 4 subplots 
-figure; imagesc
+
 %% Combine and preprocess Aout
 % setting parameters
 angle = 122.5741;
